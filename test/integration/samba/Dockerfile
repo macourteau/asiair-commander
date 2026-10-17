@@ -3,7 +3,7 @@
 # the in-memory device fake cannot exercise.
 # A Debian point-release tag rather than the bookworm-slim codename, so Dependabot
 # has a version to bump.
-FROM debian:12.15-slim
+FROM debian:13.7-slim
 RUN apt-get update && apt-get install -y --no-install-recommends samba && rm -rf /var/lib/apt/lists/*
 COPY smb.conf /etc/samba/smb.conf
 
