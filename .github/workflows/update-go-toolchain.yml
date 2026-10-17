@@ -1,0 +1,105 @@
+name: update-go-toolchain
+
+# Keep the Go toolchain pin in go.mod current. Dependabot's gomod ecosystem does
+# not bump the `go`/`toolchain` directives, so nothing else advances them.
+#
+# Policy: always-latest stable — auto-adopts whatever is newest on go.dev,
+# including across minor/major releases (e.g. go1.26.x -> go1.27.0), unattended.
+# The PR's build-test check compiles + tests on the new toolchain before
+# auto-merge, so a release that breaks something is caught and the PR simply does
+# not merge. The `go` language-floor directive is never touched here.
+#
+# The branch is pushed with a deploy key (not GITHUB_TOKEN) specifically so the
+# push triggers the build-test check that gates auto-merge — a PR opened with the
+# default token would not trigger any workflow, so the required check would never
+# run and auto-merge would deadlock.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC, matching the Dependabot cadence
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-go-toolchain
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ssh-key: ${{ secrets.GO_TOOLCHAIN_DEPLOY_KEY }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve latest stable Go toolchain
+        id: ver
+        run: |
+          set -euo pipefail
+          # go.dev/dl is the official release index; the first stable entry is the
+          # absolute latest stable (skips RCs). Initial minors carry a .0
+          # (go1.27.0), so the three-component regex matches them — no gap.
+          latest="$(curl -fsSL 'https://go.dev/dl/?mode=json' \
+                   | jq -r 'map(select(.stable)) | .[0].version' 2>/dev/null || true)"
+          printf '%s' "$latest" | grep -Eq '^go[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "no valid Go version resolved"; exit 0; } # fail-open: skip
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "resolved latest stable: $latest"
+
+      - name: Bump toolchain pin and open PR
+        if: steps.ver.outputs.latest != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.ver.outputs.latest }}
+        run: |
+          set -euo pipefail
+          # The toolchain in effect is the `toolchain` line, or — when absent —
+          # the `go` directive, exactly as ci.yml's "Pin Go toolchain" resolves
+          # it. Reading only the `toolchain` line would treat a go.mod that
+          # already pins the latest via its `go` directive as unpinned and write
+          # a `toolchain` equal to it; the go command rejects such a redundant
+          # directive with "updates to go.mod needed".
+          cur="$(awk '/^toolchain /{print $2}' go.mod)"
+          [ -n "$cur" ] || cur="go$(awk '/^go /{print $2}' go.mod)"
+
+          # Bump only on a strictly newer release, so an unchanged (or briefly
+          # regressed) go.dev index cannot write a redundant or downgraded pin.
+          newest="go$(printf '%s\n%s\n' "${cur#go}" "${LATEST#go}" | sort -V | tail -1)"
+          if [ "$newest" = "$cur" ]; then
+            echo "already current ($cur)"
+            exit 0
+          fi
+          echo "bumping Go toolchain: $cur -> $LATEST"
+
+          # Rewrites ONLY the toolchain line (adds it if absent). Do not run
+          # `go mod tidy`: it could rewrite the `go` floor.
+          go mod edit -toolchain="$LATEST"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch=auto/go-toolchain
+          # --force-with-lease leases against the remote-tracking ref, which git
+          # resolves through the fetch refspec. The checkout is single-branch, so
+          # the refspec covers only the default branch and the lease reads as
+          # "expect no such branch on the remote" — rejecting the push as "stale
+          # info" for as long as the branch outlives a merged PR. Widening the
+          # refspec and fetching the tip restores a real lease; the fetch fails
+          # harmlessly when the branch does not exist on the remote.
+          git remote set-branches --add origin "$branch"
+          git fetch --depth 1 origin "$branch" || true
+          git switch -C "$branch"
+          git commit -am "ci: bump Go toolchain to $LATEST"
+          git push --force-with-lease origin "$branch"
+
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$branch" --base main \
+              --title "ci: bump Go toolchain to $LATEST" \
+              --body "Automated bump of the \`toolchain\` pin in \`go.mod\` to the latest stable Go release (\`$LATEST\`). Merges automatically once build-test (which compiles + tests on the new toolchain) passes."
+          fi
+          gh pr merge --auto --squash "$branch"

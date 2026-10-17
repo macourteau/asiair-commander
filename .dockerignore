@@ -1,0 +1,24 @@
+# Keep the image build context to what the Dockerfile actually consumes: Go
+# sources, go.mod/go.sum, web/ sources, and the Makefile, LICENSE and
+# third_party/notices/ that `make notices` reads to write the image's licence and
+# third-party notices. Everything below is repo tooling or build output.
+.git
+.github
+.claude
+bin
+dist
+tmp
+docs
+test
+scripts
+# Exclude deploy/ except the astap pin manifest, which the build stage reads to
+# fetch + verify astap_cli (deploy/docker/Dockerfile). Excluding the dir CONTENTS
+# (not the dir itself) then re-including the file is the BuildKit-reliable form.
+deploy/*
+!deploy/astap
+deploy/astap/*
+!deploy/astap/astap-cli.json
+web/node_modules
+web/dist
+*.md
+.dockerignore

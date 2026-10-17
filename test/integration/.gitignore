@@ -1,0 +1,3 @@
+# run.sh copies the committed FITS fixture here as the Samba build context's
+# seed; it is a build input, not source.
+samba/seed/

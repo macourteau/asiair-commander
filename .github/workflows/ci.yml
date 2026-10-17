@@ -1,0 +1,237 @@
+name: CI
+
+on:
+  push:
+    # auto/go-toolchain is pushed by update-go-toolchain via a deploy key so this
+    # build-test run (the required check) fires for that PR — a PR opened with the
+    # default GITHUB_TOKEN would not trigger workflows.
+    branches: ["main", "auto/go-toolchain"]
+    tags: ["v*"]
+  pull_request:
+
+# Every job only reads the repository; the installer and docker jobs pass the
+# token solely to read the public ASTAP mirror. Granted here explicitly so a
+# change to the repository's default token permissions cannot widen it.
+permissions:
+  contents: read
+
+jobs:
+  # Builds the SPA, then the Go module (native + a Windows cross-build) and
+  # runs the full test suite. Every dependency comes straight from the Go
+  # proxy pinned by go.sum, so this needs nothing beyond Go + network — no
+  # private registry access, no vendor/ directory.
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      # modernc.org/sqlite is pure Go — no cgo anywhere in this module — and
+      # disabling it up front keeps every step (including the Windows
+      # cross-build, which has no C toolchain here) on the same footing.
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The transcript immutability check below diffs against the PR's merge
+          # base, which a shallow clone does not hold.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Build on the EXACT toolchain pinned in go.mod (the `toolchain` line, or
+      # the `go` directive when none is present) rather than whatever patch
+      # setup-go happened to install, so CI, releases, and local `make` all agree.
+      - name: Pin Go toolchain
+        run: |
+          tc=$(awk '/^toolchain /{print $2}' go.mod)
+          [ -z "$tc" ] && tc="go$(awk '/^go /{print $2}' go.mod)"
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Build SPA (web/dist, embedded by cmd/asiair-commander)
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: SPA tests
+        run: |
+          cd web
+          npm test
+
+      - name: gofmt check
+        run: |
+          files=$(find . -name '*.go')
+          out=$(gofmt -l $files)
+          if [ -n "$out" ]; then
+            echo "gofmt needed on:"
+            echo "$out"
+            exit 1
+          fi
+
+      # The golden transcripts record each remote-protocol version as shipped, so
+      # a build is held to every version ever released. A modified or deleted
+      # one would let a protocol change pass by rewriting its own test; a new
+      # protocol version adds a transcript instead. The recorded remote env
+      # values follow the same rule: a deployed .env is never rewritten, so a
+      # new env format adds a file. Renames are reported as
+      # delete plus add so a rename cannot slip past the filter. A push to main
+      # has no merge base to compare with; the PR already passed.
+      - name: Transcripts are immutable
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          changed=$(git diff --no-renames --diff-filter=MD --name-only "$base" "$HEAD_SHA" -- internal/remote/proto/testdata/transcripts/ internal/remote/tunnel/testdata/env/)
+          if [ -n "$changed" ]; then
+            echo "recorded protocol transcripts and env values must not be modified or deleted (add a new one for a protocol or env format change):"
+            echo "$changed"
+            exit 1
+          fi
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # go vet ./... skips files behind a build tag. The remotetest sources are
+      # the cross-version test's binaries; a break here would only surface at
+      # the next tailcat bump.
+      - name: go vet (remotetest tag)
+        run: go vet -tags remotetest ./...
+
+      # The integration tests are behind their own tags and only run on pushes
+      # to main, so vetting them here makes a compile break in test/integration
+      # fail the required check on the PR instead of after the merge.
+      - name: go vet (integration tests)
+        run: go vet -tags "integration remotetest" ./...
+
+      # The live-device smoke tests never run in CI (they need a real ASIAIR),
+      # so vetting is the only thing that keeps their callers compiling.
+      - name: go vet (live tag)
+        run: go vet -tags live ./...
+
+      # The demo build (cmd/asiair-commander's demo sources) is never built in
+      # CI, so this vet is what catches a compile break there.
+      - name: go vet (demo tag)
+        run: go vet -tags demo ./...
+
+      - name: go test -race
+        # The race detector requires cgo; the rest of the job runs CGO-free.
+        # The runner ships gcc, and modernc.org/sqlite stays pure Go regardless.
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./...
+
+      - name: Windows cross-build
+        run: GOOS=windows GOARCH=amd64 go build ./...
+
+  # The real-SMB integration tests: stands up the Samba/NT1 container (an
+  # ASIAIR-mimicking guest share) and drives the actual smb1client device path
+  # against it — the coverage the in-memory device Fake cannot give — directly
+  # and through a real tailcat tunnel to the remote role. run.sh builds them
+  # with the remotetest tag, whose tunnel admits the local DERP and STUN relay
+  # the tunnel tests run on loopback; they never reach public DERP. Gated to
+  # pushes on main and release tags rather than every PR: it builds a Docker
+  # image and boots Samba, so it is slower than the pure-Go build-test job,
+  # which already covers PRs. GitHub's ubuntu-latest runner ships Docker +
+  # compose, and its host port 445 is free for the loopback publish.
+  integration:
+    needs: build-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pin Go toolchain
+        run: |
+          tc=$(awk '/^toolchain /{print $2}' go.mod)
+          [ -z "$tc" ] && tc="go$(awk '/^go /{print $2}' go.mod)"
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      - name: Real-SMB and real-tunnel integration tests
+        run: make integration
+
+  # Packages the Windows binary into the NSIS installer and uploads both as
+  # artifacts. Gated to tags (releases) and pushes to main, rather than every
+  # PR, since it's a packaging step, not a correctness check — build-test
+  # already covers PRs (including the Windows cross-build) without paying
+  # the apt-get + makensis cost on every push.
+  installer:
+    needs: build-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history + tags, for `git describe` in the Makefile
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pin Go toolchain
+        run: |
+          tc=$(awk '/^toolchain /{print $2}' go.mod)
+          [ -z "$tc" ] && tc="go$(awk '/^go /{print $2}' go.mod)"
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install makensis
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends nsis
+
+      - name: Build Windows binary
+        run: make build-windows
+
+      # The token is only used if the astap mirror fallback is reached; see
+      # tools/fetch-astap.
+      - name: Build installer
+        run: make installer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: asiair-commander-windows
+          path: |
+            bin/asiair-commander.exe
+            bin/THIRD_PARTY_NOTICES/
+            dist/asiair-commander-setup-*.exe
+          if-no-files-found: error
+
+  # Build-only check of the container image (single arch, no push, no secrets)
+  # so Dockerfile rot surfaces here instead of failing release.yml's docker job
+  # at tag time. Gated like installer: packaging, not a per-PR correctness check.
+  docker:
+    needs: build-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}

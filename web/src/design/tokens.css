@@ -1,0 +1,185 @@
+/*
+ * Design tokens for ASIAIR Commander.
+ *
+ * Dark is the default (observatory night). Themes are switched by the
+ * `data-theme` attribute on <html> (set pre-paint by the inline script in
+ * index.html and thereafter by useTheme). Every color below is chosen to meet
+ * WCAG 2.1 AA for its intended use in BOTH themes — status foregrounds are the
+ * Primer-derived hues that pass on the surface they sit on.
+ *
+ * Convention: semantic status color NEVER carries meaning alone. These tokens
+ * pair with an icon + text label in <StatusPill> and the dashboard hero band.
+ */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces — a blue-black night, layered by elevation. */
+  --bg: #0b0f14;
+  --surface: #131a23;
+  --surface-2: #1b2530;
+  --surface-inset: #0e141b;
+  --border: #263243;
+  --border-strong: #33445a;
+
+  /* Text. */
+  --text: #e6edf3;
+  --text-muted: #9fb0c0;
+  --text-faint: #74869a;
+
+  /* Cool accent (CCD readout cyan) — links, focus, active nav, selection. */
+  --accent: #56c9e8;
+  --accent-hover: #7ad6ef;
+  --accent-quiet: color-mix(in srgb, var(--accent) 16%, transparent);
+  --on-accent: #071119;
+
+  /* Semantic status — the heavy lifter. fg = readable text/icon on surfaces;
+     tint = translucent fill behind it; solid = saturated bar/dot. */
+  --safe-fg: #52d17c;
+  --safe-solid: #2ea043;
+  --safe-tint: color-mix(in srgb, var(--safe-fg) 15%, transparent);
+  --safe-border: color-mix(in srgb, var(--safe-fg) 40%, transparent);
+
+  --work-fg: #e3b341;
+  --work-solid: #bb8009;
+  --work-tint: color-mix(in srgb, var(--work-fg) 15%, transparent);
+  --work-border: color-mix(in srgb, var(--work-fg) 40%, transparent);
+
+  --problem-fg: #ff7b72;
+  --problem-solid: #da3633;
+  --problem-tint: color-mix(in srgb, var(--problem-fg) 15%, transparent);
+  --problem-border: color-mix(in srgb, var(--problem-fg) 42%, transparent);
+
+  /* "unknown / offline" — deliberately neutral, never green. */
+  --neutral-fg: #9fb0c0;
+  --neutral-solid: #56657a;
+  --neutral-tint: color-mix(in srgb, var(--neutral-fg) 12%, transparent);
+  --neutral-border: color-mix(in srgb, var(--neutral-fg) 32%, transparent);
+
+  --info-fg: #79c0ff;
+  --info-tint: color-mix(in srgb, var(--info-fg) 14%, transparent);
+  --info-border: color-mix(in srgb, var(--info-fg) 38%, transparent);
+
+  --focus-ring: var(--accent);
+  --overlay-scrim: rgba(2, 6, 12, 0.66);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eceff4;
+  --surface: #ffffff;
+  --surface-2: #f4f6fa;
+  --surface-inset: #f0f3f8;
+  --border: #d3dae3;
+  --border-strong: #b9c3ce;
+
+  --text: #111826;
+  --text-muted: #4a5666;
+  --text-faint: #6b7787;
+
+  --accent: #0b7285;
+  --accent-hover: #095a69;
+  --accent-quiet: color-mix(in srgb, var(--accent) 12%, transparent);
+  --on-accent: #ffffff;
+
+  --safe-fg: #1a7f37;
+  --safe-solid: #2ea043;
+  --safe-tint: color-mix(in srgb, var(--safe-fg) 12%, transparent);
+  --safe-border: color-mix(in srgb, var(--safe-fg) 34%, transparent);
+
+  --work-fg: #9a6700;
+  --work-solid: #bb8009;
+  --work-tint: color-mix(in srgb, var(--work-fg) 12%, transparent);
+  --work-border: color-mix(in srgb, var(--work-fg) 34%, transparent);
+
+  --problem-fg: #cf222e;
+  --problem-solid: #da3633;
+  --problem-tint: color-mix(in srgb, var(--problem-fg) 11%, transparent);
+  --problem-border: color-mix(in srgb, var(--problem-fg) 34%, transparent);
+
+  --neutral-fg: #4a5666;
+  --neutral-solid: #6b7787;
+  --neutral-tint: color-mix(in srgb, var(--neutral-fg) 10%, transparent);
+  --neutral-border: color-mix(in srgb, var(--neutral-fg) 30%, transparent);
+
+  --info-fg: #0857a8;
+  --info-tint: color-mix(in srgb, var(--info-fg) 10%, transparent);
+  --info-border: color-mix(in srgb, var(--info-fg) 32%, transparent);
+
+  --focus-ring: var(--accent);
+  --overlay-scrim: rgba(17, 24, 38, 0.4);
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 6px 20px rgba(16, 24, 40, 0.12);
+  --shadow-overlay: 0 16px 48px rgba(16, 24, 40, 0.24);
+}
+
+:root {
+  /* Spacing — a 4px grid. */
+  --space-0: 0;
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Typography. System sans for chrome; monospace (tabular) for machine data:
+     free space, timestamps, file paths, template previews, counts. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", "Cascadia Code",
+    "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem; /* 12 */
+  --text-sm: 0.8125rem; /* 13 */
+  --text-base: 0.875rem; /* 14 */
+  --text-md: 1rem; /* 16 */
+  --text-lg: 1.25rem; /* 20 */
+  --text-xl: 1.75rem; /* 28 */
+  --text-2xl: 2.5rem; /* 40 */
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.5;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Radii. */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Motion — durations honor prefers-reduced-motion via base.css. */
+  --dur-fast: 90ms;
+  --dur-base: 160ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout. */
+  --nav-width: 236px;
+  --topbar-height: 56px;
+  --content-max: 1600px;
+  --touch-min: 44px; /* minimum interactive target on touch */
+
+  /* z-index scale. */
+  --z-nav: 100;
+  --z-sticky: 200;
+  --z-toast: 900;
+  --z-overlay: 1000;
+}

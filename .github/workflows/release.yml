@@ -1,0 +1,236 @@
+name: Release
+
+# Builds the Windows installer for a version and publishes it as a GitHub Release.
+# Fired by a human/tooling pushing a v* tag, or dispatched by auto-release with the
+# version it derived.
+#
+# When dispatched, the tag does not exist yet: this workflow creates it, and only after
+# the installer has built. That order is the point. Tagging up front leaves the tag
+# behind when the build fails — no release is ever published for it, and the next
+# auto-release reads it as the latest tag, so its commits fall out of every future
+# release's generated notes. Tagging last means a failed build leaves nothing behind,
+# and the next auto-release derives the same version and retries.
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables):
+#   AC_SIGN_ENDPOINT  Azure Artifact Signing endpoint host, e.g. <region>.codesigning.azure.net
+#   AC_SIGN_ALIAS     <signing account>/<certificate profile>
+# The release environment holds AZURE_CLIENT_ID, AZURE_TENANT_ID and
+# AZURE_SUBSCRIPTION_ID as secrets.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. v0.2.0). Tagged only once the build succeeds."
+        required: true
+      sha:
+        description: "Commit to build and tag. Defaults to the dispatched ref's head."
+        required: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Signing credentials are reachable only from this environment: the Entra
+    # federated credential matches one subject and nothing else, in GitHub's
+    # *immutable* subject format,
+    #   repo:<owner>@<owner-id>/<repo>@<repo-id>:environment:release
+    # with the numeric owner and repository IDs beside the names, so renaming
+    # either cannot be used to impersonate the trust policy. The name-only form
+    # most documentation shows is not what this repository's token carries, and
+    # configuring it that way fails with AADSTS700213 at the login step. Read the
+    # exact subject from the azure/login log of a first dispatch (its "subject
+    # claim" line) rather than assuming a format.
+    #
+    # Scoped to the environment rather than to refs/tags/* because this workflow
+    # is also dispatched by auto-release.yml, where the ref is a branch — a
+    # tag-scoped credential would authenticate manual tag pushes and then fail
+    # exactly on the unattended daily run. For the same reason the environment
+    # must not carry required reviewers.
+    environment: release
+    permissions:
+      contents: write # pushes the tag and publishes the release
+      id-token: write # mints the OIDC token azure/login exchanges for signing
+    env:
+      CGO_ENABLED: "0"
+      VERSION: ${{ inputs.version || github.ref_name }}
+    steps:
+      # Fails before any work when the signing configuration is missing (a fresh
+      # fork or a repository that never set it), naming what to set, instead of
+      # failing inside the signing script halfway through the build.
+      - name: Require signing configuration
+        env:
+          AC_SIGN_ENDPOINT: ${{ vars.AC_SIGN_ENDPOINT }}
+          AC_SIGN_ALIAS: ${{ vars.AC_SIGN_ALIAS }}
+        run: |
+          missing=0
+          for v in AC_SIGN_ENDPOINT AC_SIGN_ALIAS; do
+            if [ -z "$(printenv "$v")" ]; then
+              echo "::error::Repository variable $v is not set (Settings > Secrets and variables > Actions > Variables)."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0 # full history + tags: the release notes need the previous v* tag
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pin Go toolchain
+        run: |
+          tc=$(awk '/^toolchain /{print $2}' go.mod)
+          [ -z "$tc" ] && tc="go$(awk '/^go /{print $2}' go.mod)"
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install makensis
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends nsis
+
+      # jsign signs Authenticode from Linux, which keeps the installer on one
+      # runner: Microsoft's own signtool, `dotnet sign` and
+      # azure/artifact-signing-action are Windows-only by design. Pinned by
+      # checksum because it is a release asset, not a package from a repository
+      # with its own signing.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install jsign
+        env:
+          JSIGN_VERSION: "7.5"
+          JSIGN_SHA256: 602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/jsign.jar \
+            "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+          echo "${JSIGN_SHA256}  /tmp/jsign.jar" | sha256sum -c -
+
+      # No client secret exists: the federated credential above is the
+      # authorization, and these three values are identifiers, not credentials.
+      # The session it leaves behind is what scripts/sign-windows.sh mints its
+      # short-lived signing token from.
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Find the previous release tag
+        id: prev
+        # Pinning the comparison base keeps the generated notes honest whatever else
+        # is tagged in the repo — the astap-cli-* mirror prereleases in particular.
+        run: |
+          set -euo pipefail
+          prev=$(git tag --list 'v*' --sort=-version:refname | grep -vFx "$VERSION" | head -n1 || true)
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "Release notes range: ${prev:-(start of history)}..$VERSION"
+
+      # VERSION is passed explicitly rather than left to the Makefile's `git describe`,
+      # which cannot see a tag that does not exist yet.
+      # SIGN=1 signs bin/asiair-commander.exe before makensis packages it, then
+      # the .nsi's !uninstfinalize/!finalize hooks sign the uninstaller stub and
+      # the setup executable. A signing failure fails this step, which is what
+      # keeps it from reaching the tag below. bin/astap_cli.exe is deliberately
+      # left unsigned: it is a pinned third-party binary, and signing it would
+      # assert us as its publisher rather than merely as the party that verified
+      # its hash.
+      - name: Build installer (SPA + Windows binary + NSIS package)
+        run: make installer VERSION="$VERSION" SIGN=1
+        env:
+          # Only used if the astap mirror fallback is reached; see tools/fetch-astap.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AC_SIGN_ENDPOINT: ${{ vars.AC_SIGN_ENDPOINT }}
+          AC_SIGN_ALIAS: ${{ vars.AC_SIGN_ALIAS }}
+          JSIGN_JAR: /tmp/jsign.jar
+
+      # The bare .exe is published beside the installer, so its notices are too.
+      - name: Package the notices
+        run: cd bin && zip -qr ../dist/THIRD_PARTY_NOTICES-windows-amd64.zip THIRD_PARTY_NOTICES
+
+      - name: Tag the release
+        run: |
+          set -euo pipefail
+          git tag -f "$VERSION" HEAD
+          git push origin "refs/tags/$VERSION"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.VERSION }}
+          previous_tag: ${{ steps.prev.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            bin/asiair-commander.exe
+            dist/asiair-commander-setup-*.exe
+            dist/THIRD_PARTY_NOTICES-windows-amd64.zip
+
+  # Builds the multi-arch container image and pushes it to ghcr.io. It waits on the
+  # installer job because that job is what creates the tag: publishing an image for a
+  # version that never got tagged or released would leave the registry ahead of the
+  # repository. A failure here still does not unpublish the release.
+  docker:
+    runs-on: ubuntu-latest
+    needs: release
+    permissions:
+      contents: read
+      packages: write # pushes the image to ghcr.io
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image version metadata
+        id: meta
+        run: |
+          TAG="${{ inputs.version || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/macourteau/asiair-commander:${{ steps.meta.outputs.version }}
+            ghcr.io/macourteau/asiair-commander:latest
+          # The source label is what links the ghcr.io package to this repository.
+          labels: |
+            org.opencontainers.image.source=https://github.com/macourteau/asiair-commander
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.revision }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.build_time }}
+          # ghcr.io shows a multi-arch package's description from the image index,
+          # not from the per-platform config labels above, hence an index-level
+          # annotation. Valid only because this build pushes an index (two platforms).
+          annotations: |
+            index:org.opencontainers.image.description=Watches ZWO ASIAIR astrophotography rigs over SMB and files their captured frames onto NAS storage, with a web UI for setup, monitoring and history.
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.tag }}
+            COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_TIME=${{ steps.meta.outputs.build_time }}

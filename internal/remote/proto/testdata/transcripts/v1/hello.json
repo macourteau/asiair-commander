@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "op": "hello",
+  "request": {"v": 1, "call_id": "c-hello-0001", "op": "hello"},
+  "replies": [
+    {
+      "v": 1,
+      "call_id": "c-hello-0001",
+      "kind": "result",
+      "hello": {
+        "versions": [1],
+        "whole_digest_version": 1,
+        "data_digest_version": 1,
+        "build": {"version": "v1.30.0", "commit": "abc1234", "date": "2026-10-06T12:00:00Z"},
+        "uptime_ms": 3723000,
+        "instance_id": "5f0c2a9e8b7d4c3a1f2e3d4c5b6a7980",
+        "path": {"connected": true, "direct": false, "relay_region": "nyc"},
+        "warnings": [
+          {"seq": 1, "age_ms": 600000, "kind": "broadcast_failed", "call_id": "c-bcast-0007", "reason": "open broadcast socket: network is unreachable"},
+          {"seq": 2, "age_ms": 120000, "kind": "refused_forward", "proto": "tcp", "target": "192.168.1.77:445", "reason": "the address has not answered the remote's scan_air broadcast"},
+          {"seq": 3, "age_ms": 5000, "kind": "rejected_client", "client_key": "nodekey:1111111111111111111111111111111111111111111111111111111111111111", "reason": "a client key other than the pinned one tried to connect; the pairing may have leaked"}
+        ]
+      }
+    }
+  ]
+}

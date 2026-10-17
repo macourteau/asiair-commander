@@ -1,0 +1,11 @@
+/* The next-frame cadence readout — a muted, small "the device is working" line,
+   matching the next-check countdown's weight so the two live signals read alike. */
+.rig-nextframe {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+/* Low-confidence single-frame guess and the "waiting" hint sit a touch quieter. */
+.rig-nextframe--soft,
+.rig-nextframe--muted {
+  font-style: italic;
+}

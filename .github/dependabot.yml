@@ -1,0 +1,53 @@
+version: 2
+updates:
+  # Go module dependencies. The gomod ecosystem does NOT bump the `go`/`toolchain`
+  # directives in go.mod — the exact toolchain pin is advanced by the
+  # update-go-toolchain workflow instead.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # Direct dependencies, as by default, plus go-licenses: a `tool` directive's
+    # module is listed as `// indirect` in go.mod, which Dependabot skips unless
+    # allowed by name.
+    allow:
+      - dependency-type: direct
+      - dependency-name: github.com/google/go-licenses/v2
+        dependency-type: all
+    commit-message:
+      prefix: "deps"
+
+  # The React/Vite SPA under web/.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  # The GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  # Base images in the container-image Dockerfile (node, golang). The distroless
+  # runtime image floats on an unversioned tag, so Dependabot leaves it alone.
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  # Base image of the Samba/NT1 container the integration tests run against, pinned
+  # to a Debian point release. A major bump is a new Debian release, whose Samba
+  # may drop NT1, so it waits for a human.
+  - package-ecosystem: docker
+    directory: /test/integration/samba
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"

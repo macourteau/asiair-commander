@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in ASIAIR Commander does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **This issue is public. Do not paste personal data.** Before you submit, remove or replace with placeholders:
+        > - IP addresses, hostnames and domain names (use `192.0.2.10`, `nas.example`)
+        > - file paths that contain your user name or other personal names
+        > - ASIAIR device GUIDs, CPU IDs, serial numbers and Wi-Fi names (SSIDs)
+        > - remote pairing values from a `.env` file, passwords and setup tokens
+        > - FITS headers that carry site or observer data (location, observer, telescope or site names)
+        >
+        > Logs contain several of these. Redact them before pasting, and paste only the lines around the problem.
+
+        A security problem goes through [private reporting](https://github.com/macourteau/asiair-commander/blob/main/SECURITY.md) instead, never in an issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown beside the name in the web UI's navigation bar, or printed by `asiair-commander version`.
+      placeholder: "1.28.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install type
+      options:
+        - Docker (container image)
+        - Windows installer
+        - Built from source
+        - Remote site (remote role)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did and what Commander did, step by step. Describe your setup in general terms, such as "two rigs, one on a USB stick".
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Redacted log lines around the problem. Docker: `docker logs asiair-commander`. Windows: the files under `%ProgramData%\ASIAIRCommander\logs`. Check every line for the items in the warning above before submitting.
+      render: text
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Personal data
+      options:
+        - label: I removed IP addresses, hostnames, personal paths, device identifiers, secrets and site data from everything above.
+          required: true

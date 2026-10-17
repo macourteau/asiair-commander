@@ -1,0 +1,16 @@
+ASTAP command-line solver (astap_cli)
+License: MPL-2.0 (Mozilla Public License, version 2.0)
+
+This distribution bundles astap_cli, the command-line plate solver of ASTAP
+(Astrometric STAcking Program). It is redistributed unmodified, exactly as
+published upstream, as a separate executable that ASIAIR Commander runs as a
+child process; no ASTAP code is compiled into ASIAIR Commander.
+
+astap_cli is licensed under the Mozilla Public License, version 2.0. A copy of
+the licence is available at https://mozilla.org/MPL/2.0/.
+
+The Source Code Form of ASTAP is available from the upstream project:
+
+  Project: https://sourceforge.net/projects/astap-program/
+  Source:  https://sourceforge.net/p/astap-program/code/
+           (hg clone http://hg.code.sf.net/p/astap-program/code astap-program-code)

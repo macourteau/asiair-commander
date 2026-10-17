@@ -1,0 +1,241 @@
+/*
+ * App shell: a persistent sidebar on desktop, a top bar + slide-in drawer on
+ * mobile. One <Nav> serves both — CSS decides whether it's docked or off-canvas.
+ */
+
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Skip link — first tab stop, jumps past the nav to the content. */
+.shell-skip {
+  position: absolute;
+  left: var(--space-3);
+  top: -60px;
+  z-index: var(--z-overlay);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition: top var(--dur-base) var(--ease);
+}
+.shell-skip:focus {
+  top: var(--space-3);
+}
+
+/* ---- Nav (sidebar / drawer) ------------------------------------------- */
+.shell-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: var(--nav-width);
+  padding: var(--space-4) var(--space-3);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3);
+}
+.shell-brand__mark {
+  color: var(--accent);
+  flex: none;
+}
+.shell-brand__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.shell-brand__name {
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+  line-height: 1.1;
+}
+.shell-brand__version {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.shell-navlist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shell-navlink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: 40px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.shell-navlink:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+.shell-navlink.is-active {
+  background: var(--accent-quiet);
+  color: var(--accent);
+}
+.shell-navlink svg {
+  flex: none;
+}
+.shell-navlink__label {
+  flex: 1 1 auto;
+}
+.shell-nav__spacer {
+  flex: 1 1 auto;
+}
+.shell-nav__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.shell-nav__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  min-height: 44px;
+}
+.shell-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  padding: 0 var(--space-2);
+}
+.shell-conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neutral-solid);
+  flex: none;
+}
+.shell-conn--open .shell-conn__dot {
+  background: var(--safe-solid);
+}
+.shell-conn--reconnecting .shell-conn__dot {
+  background: var(--work-solid);
+}
+
+/* ---- Top bar (mobile only) -------------------------------------------- */
+.shell-topbar {
+  display: none;
+}
+.shell-drawer-scrim {
+  display: none;
+}
+
+/* ---- Main ------------------------------------------------------------- */
+.shell-main {
+  min-width: 0;
+}
+.shell-content {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+/* Version-skew banner: the tab is running an older UI build than the server it's
+   talking to (see VersionBanner). Informational, not alarming — uses the info
+   tokens and spans the top of the content column above the active surface. */
+.version-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--info-tint);
+  border-bottom: 1px solid var(--info-border);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.version-banner > svg {
+  color: var(--info-fg);
+  flex: 0 0 auto;
+}
+.version-banner__text {
+  flex: 1 1 auto;
+}
+.version-banner .aac-btn {
+  flex: 0 0 auto;
+}
+
+/* ---- Desktop: docked sidebar ------------------------------------------ */
+@media (min-width: 960px) {
+  .shell {
+    display: grid;
+    grid-template-columns: var(--nav-width) 1fr;
+  }
+  .shell-nav {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+/* ---- Mobile: top bar + off-canvas drawer ------------------------------ */
+@media (max-width: 959.98px) {
+  .shell-topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    height: var(--topbar-height);
+    padding: 0 var(--space-3);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .shell-topbar__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: var(--weight-bold);
+  }
+  .shell-topbar__brand svg {
+    color: var(--accent);
+  }
+  .shell-nav {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: var(--z-nav);
+    height: 100dvh;
+    transform: translateX(-100%);
+    transition: transform var(--dur-base) var(--ease);
+    box-shadow: var(--shadow-overlay);
+  }
+  .shell-nav--open {
+    transform: translateX(0);
+  }
+  .shell-drawer-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-nav) - 1);
+    background: var(--overlay-scrim);
+  }
+  .shell-content {
+    padding: var(--space-4);
+  }
+}
+
+/* Fleet-wide pause/resume switch, docked under the nav list. */
+.shell-nav__global {
+  padding: var(--space-3) var(--space-4) 0;
+}

@@ -1,0 +1,34 @@
+.DS_Store
+/bin/
+/dist/
+
+# Local Go workspace (developer-specific; CI and releases build from go.mod alone)
+go.work
+go.work.sum
+
+# Built SPA staged into the embed dir by `make spa`; never committed. The .gitkeep keeps the
+# directory, so a bare `go build` (no Node) still satisfies the embed and serves
+# internal/web/placeholder.html instead of the SPA.
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+
+# Node
+web/node_modules/
+web/dist/
+
+# stray root build output (Makefile builds to bin/)
+/asiair-commander
+
+# air live-reload (dev-only)
+.air.toml
+/tmp/
+
+# Generated UI screenshots (the capture script stays tracked)
+/scripts/screenshots/
+
+# Personal, machine-local files (CLAUDE.local.md, settings.local.json, ...)
+*.local.*
+
+# Claude Code local state
+/.claude/worktrees/
+/.claude/scheduled_tasks.lock

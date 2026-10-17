@@ -1,0 +1,35 @@
+/* AllowedHostsField — one address per row, with the remove control alongside.
+   Co-located with the component because it is shared by the auth screen and the
+   Settings surface, which load different stylesheets. */
+
+.allowed-hosts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.allowed-hosts__entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.allowed-hosts__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.allowed-hosts__add {
+  margin-top: var(--space-3);
+}
+
+.allowed-hosts__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--work-fg);
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "op": "broadcast",
+  "request": {"v": 1, "call_id": "c-bcast-0001", "op": "broadcast"},
+  "replies": [
+    {
+      "v": 1,
+      "call_id": "c-bcast-0001",
+      "kind": "result",
+      "broadcast": {
+        "replies": [
+          {"data": "eyJqc29ucnBjIjoiMi4wIiwibWV0aG9kIjoic2Nhbl9haXIiLCJyZXN1bHQiOnsiZ3VpZCI6IjBhMWIyYzNkIiwiY3B1SWQiOiIwMDExMjIzMzQ0NTU2Njc3IiwiaXAiOiIxOTIuMTY4LjEuNzUiLCJtb2RlbCI6IlpXTyBBaXJQbHVzLVJLMzU2OCAoTGludXgpIiwic3NpZCI6IkFTSUFJUl8wYTFiMmMzZCJ9LCJjb2RlIjowLCJpZCI6IjEzMiJ9", "src_ip": "192.168.1.75"},
+          {"data": "eyJtZXRob2QiOiJzY2FuX2FpciIsInJlc3VsdCI6eyJndWlkIjoiNWVlZDAwMDEifSwiY29kZSI6MH0=", "src_ip": "192.168.1.76"}
+        ]
+      }
+    }
+  ]
+}

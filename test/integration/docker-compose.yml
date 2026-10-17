@@ -1,0 +1,21 @@
+# The real-SMB integration stack: Samba containers speaking SMB1/NT1 with a
+# guest-authenticated "EMMC Images" share, standing in for an ASIAIR's
+# removable media. The Go integration test dials them over the actual
+# smb1client device path.
+services:
+  samba:
+    build:
+      context: ./samba
+    # smb1client hard-codes port 445 (net.JoinHostPort(host, "445")), so the
+    # container must publish on host 445; bound to loopback only.
+    ports:
+      - "127.0.0.1:445:445"
+  # A second ASIAIR, on a remote's LAN: the real-tunnel tests that need two
+  # distinct devices map it onto the remote's mapped LAN address, so Commander
+  # reaches it only through the tunnel. Port 445 is taken by the first, and no
+  # Commander dial needs this one on 445: the remote's LAN dial maps the port.
+  samba-remote:
+    build:
+      context: ./samba
+    ports:
+      - "127.0.0.1:1445:445"

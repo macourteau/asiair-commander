@@ -1,0 +1,143 @@
+name: update-astap-cli
+
+# Keep the pinned ASTAP command-line solver (deploy/astap/astap-cli.json) current.
+# It re-fetches every platform's upstream zip, re-pins the checksums + version when any
+# digest changed and opens a PR, then mirrors whatever version the manifest now pins to
+# an astap-cli-<version> prerelease.
+#
+# The mirror is not a nicety. SourceForge serves the CLI from a version-less URL it
+# overwrites in place and archives only one historical CLI snapshot, so the moment
+# upstream rolls a release, every build pinned to the previous one has nowhere left to
+# fetch from. tools/fetch-astap falls back to the mirror for exactly that window.
+#
+# The mirror releases live on this repo (see tools/fetch-astap for how builds read
+# them). Never delete one: it is the only surviving copy of the ASTAP build every
+# Commander release pinned to it was made with.
+#
+# Deliberately NOT auto-merged: the solver is correctness-critical (a bad WCS is worse
+# than no answer), so a bump warrants a human re-validating a real solve locally
+#   ASTAP_BIN=… ASTAP_CATALOG_DIR=… ASTAP_FRAME=… go test ./internal/platesolve -run TestRealSolveE2E
+# before it ships. The reviewer merges by hand.
+#
+# The branch is pushed with a deploy key (not GITHUB_TOKEN) so the push triggers the
+# required build-test check, giving the reviewer a green signal to merge on. Add a
+# repo deploy key with write access as the ASTAP_UPDATE_DEPLOY_KEY secret (same setup
+# as GO_TOOLCHAIN_DEPLOY_KEY); reuse that key if you prefer a single one.
+#
+# A push to main that changes the pin runs it too, so a pin that reaches main by any
+# other route than this workflow's PR (a hand edit, or a repository's first commit) is
+# mirrored while SourceForge still serves its bytes, not at the next weekly run, which
+# may come after upstream has already rolled past it.
+on:
+  schedule:
+    - cron: "0 6 * * 2" # Tuesdays 06:00 UTC (a day after the Go-toolchain job)
+  push:
+    branches: [main]
+    paths: [deploy/astap/astap-cli.json]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-astap-cli
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ssh-key: ${{ secrets.ASTAP_UPDATE_DEPLOY_KEY }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Re-pin astap_cli if upstream changed
+        id: repin
+        run: |
+          set -euo pipefail
+          go run ./tools/fetch-astap update
+          if git diff --quiet -- deploy/astap/astap-cli.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "astap_cli pin already current"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$(jq -r .version deploy/astap/astap-cli.json)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a manual-review PR
+        if: steps.repin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.repin.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch=auto/astap-cli
+          # --force-with-lease leases against the remote-tracking ref, which git
+          # resolves through the fetch refspec. The checkout is single-branch, so
+          # the refspec covers only the default branch and the lease reads as
+          # "expect no such branch on the remote" — rejecting the push as "stale
+          # info" for as long as the branch outlives a merged PR. Widening the
+          # refspec and fetching the tip restores a real lease; the fetch fails
+          # harmlessly when the branch does not exist on the remote.
+          git remote set-branches --add origin "$branch"
+          git fetch --depth 1 origin "$branch" || true
+          git switch -C "$branch"
+          git commit -am "build: bump pinned astap_cli to $VERSION"
+          git push --force-with-lease origin "$branch"
+
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            body="$(printf '%s\n' \
+              "Automated re-pin of the ASTAP command-line solver in \`deploy/astap/astap-cli.json\` (checksums + version \`$VERSION\`)." \
+              '' \
+              '**Manual review — do not auto-merge.** Before merging, re-validate a real solve locally:' \
+              '```' \
+              'ASTAP_BIN=… ASTAP_CATALOG_DIR=… ASTAP_FRAME=/path/to/unsolved.fit go test ./internal/platesolve -run TestRealSolveE2E -v' \
+              '```' \
+              'Then confirm the new checksums match what SourceForge serves.')"
+            gh pr create --head "$branch" --base main \
+              --title "build: bump pinned astap_cli to $VERSION" \
+              --body "$body"
+          fi
+
+      # Deliberately not gated on a change: the contract is that a mirror exists for
+      # whatever the manifest pins. That covers the window in which a build would
+      # otherwise fail: while the PR waits for review, main still pins the previous
+      # version, and its mirror is the only place those bytes survive.
+      #
+      # Last, because it fails exactly when upstream has already rolled past the pinned
+      # version — the moment the re-pin PR matters most. Opening that PR first means a
+      # loud mirror failure never withholds the fix for it.
+      - name: Mirror the pinned zips
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version deploy/astap/astap-cli.json)
+          tag="astap-cli-$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "mirror release $tag already exists"
+            exit 0
+          fi
+          # Re-downloads each zip and refuses to stage anything that does not match the
+          # pinned digest, so the mirror can never disagree with the manifest.
+          out="$RUNNER_TEMP/astap-mirror"
+          go run ./tools/fetch-astap mirror "$out"
+
+          notes="$(printf '%s\n' \
+            "Upstream ASTAP command-line zips for \`$VERSION\`, byte-identical to the checksums pinned in \`deploy/astap/astap-cli.json\`." \
+            '' \
+            'Not a product release. SourceForge overwrites its version-less `astap_command-line_version_*.zip` in place and archives only one historical CLI snapshot, so builds fall back here once upstream rolls past this version.' \
+            '' \
+            '**Do not delete.** Removing it breaks reproducible builds of every Commander release pinned to this solver.')"
+          # A prerelease so it stays out of "Latest" and out of the v* release stream.
+          gh release create "$tag" --prerelease \
+            --title "astap_cli $VERSION (build mirror)" \
+            --notes "$notes" \
+            "$out"/*.zip

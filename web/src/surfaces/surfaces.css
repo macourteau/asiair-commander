@@ -1,0 +1,1048 @@
+/*
+ * Shared styles for the wave-2 surfaces (Devices, Settings, Logs, Alerts). Built
+ * from the same tokens and utility layer as the rest of the app; imported by each
+ * surface (Vite dedupes). Dual-density: single column and glanceable on mobile,
+ * denser multi-column on desktop.
+ */
+
+/* ---- Surface header ---------------------------------------------------- */
+.surface-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.surface-head__title {
+  font-size: var(--text-xl);
+  letter-spacing: -0.01em;
+}
+.surface-head__desc {
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+  max-width: 64ch;
+}
+.surface-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Section heading inside a surface. */
+.section-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+.section-sub {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin-top: 2px;
+}
+.section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* A toolbar row (filters, tabs, live status). */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* A 2-up responsive form grid; children span one column unless .form-grid__full. */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+@media (min-width: 720px) {
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.form-grid__full {
+  grid-column: 1 / -1;
+}
+
+/* Rig editor — where this rig's frames land. The destination is built from OTA,
+   never from the rig's name, and the two are edited eight fields apart, so the
+   folder is spelled out under the pair that decides it. */
+.ota-guidance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ota-guidance__path {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.ota-guidance__path .mono,
+.ota-guidance__nudge .mono {
+  /* A rendered template is one unbreakable run of tokens and separators. Without
+     this it widens the layout viewport on a phone rather than wrapping. */
+  overflow-wrap: anywhere;
+}
+.ota-guidance__nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--work-tint);
+  border: 1px solid var(--work-border);
+  border-radius: var(--radius-md);
+}
+.ota-guidance__msg {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex: 1 1 16ch;
+}
+@media (max-width: 719px) {
+  /* Narrow enough that keeping the offer alongside the sentence squeezes it to a
+     column a few words wide; give the sentence the row and let the button wrap. */
+  .ota-guidance__msg {
+    flex-basis: 100%;
+  }
+}
+.ota-guidance__msg > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--work-fg);
+}
+
+/* ---- Segmented control (Logs tabs) ------------------------------------- */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.seg__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.seg__btn:hover {
+  color: var(--text);
+}
+.seg__btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---- Alerts ------------------------------------------------------------ */
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.alert-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-left: 4px solid var(--tone-solid);
+}
+.alert-item--acked {
+  opacity: 0.72;
+}
+.alert-item__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  justify-content: space-between;
+}
+.alert-item__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.alert-item__message {
+  color: var(--text);
+  /* Messages embed full FITS paths — long unbreakable strings. Wrap them so a
+     narrow (mobile) viewport never gets forced wider into a horizontal scroll. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.alert-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* ---- Devices ----------------------------------------------------------- */
+.rig-list,
+.disc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.rig-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+.rig-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.rig-item__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.rig-item__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.rig-item__facts .mono {
+  color: var(--text);
+}
+/* An inline IP rendered as a Windows click-to-open SMB shortcut: reads as a link,
+   not a chrome button, so it sits naturally inside the facts line. */
+.smb-address {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.smb-address:hover {
+  text-decoration: underline;
+}
+.smb-address:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.rig-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* The rig's status pill, right-aligned in the header. */
+.rig-item__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+/* Monitoring chip + its live "next check" tooltip. The tooltip is a real DOM
+   element (not an SVG <title>/native title, which show inconsistently and freeze
+   their text once opened) revealed on hover/focus, so it appears reliably and
+   reflects the ticking countdown. Anchored to the pill's right edge and dropped
+   below it, matching the right-aligned status column, so it never overflows the
+   card. */
+.aac-monitoring {
+  position: relative;
+  display: inline-flex;
+}
+.aac-monitoring__tip {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  padding: 2px 8px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--neutral-fg);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-overlay);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.aac-monitoring:hover .aac-monitoring__tip,
+.aac-monitoring:focus-within .aac-monitoring__tip {
+  opacity: 1;
+  visibility: visible;
+}
+.rig-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* Live transfer feedback: the shared current-file progress plus a compact
+   frames-tonight/drain line, so a busy rig reads as alive between files. */
+.rig-item__live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.rig-item__live-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+}
+.rig-item__drain {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Source (share + roots) editor rows. */
+.source-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.source-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* ---- Settings: key/value tables (alias, sensor map) -------------------- */
+.kv-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+.kv-row__arrow {
+  color: var(--text-faint);
+}
+@media (max-width: 559px) {
+  .kv-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "k del"
+      "v del";
+    row-gap: var(--space-1);
+  }
+  .kv-row__arrow {
+    display: none;
+  }
+}
+
+/* ---- Settings: plate-solving star catalogs ----------------------------- */
+.catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.catalog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.catalog-row__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.catalog-row__name {
+  font-family: var(--font-mono);
+}
+.catalog-row__coverage {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.catalog-row__action {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.catalog-installed {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.catalog-bar {
+  width: 140px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.catalog-bar__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width var(--dur-slow) var(--ease);
+}
+
+/* ---- Settings: template editor ----------------------------------------- */
+.tmpl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.tmpl__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.tmpl__name {
+  font-weight: var(--weight-semibold);
+}
+.tmpl__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  word-break: break-all;
+}
+/* A template whose feature is switched off stays visible so its layout is
+   discoverable, but reads as inert. The note beneath says why, so the muting is
+   never mistaken for something broken. */
+.tmpl[data-disabled] .tmpl__name,
+.tmpl[data-disabled] .tmpl__value {
+  color: var(--text-muted);
+}
+.tmpl__note {
+  margin: 0;
+}
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-quiet);
+}
+
+/* Live preview. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.preview__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.preview__row:last-child {
+  border-bottom: 0;
+}
+.preview__type {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.preview__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  word-break: break-all;
+}
+.preview__dest {
+  color: var(--accent);
+}
+.preview__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  color: var(--problem-fg);
+  font-size: var(--text-sm);
+}
+.preview__error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* ---- Notices (concurrency / validation) -------------------------------- */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  border: 1px solid var(--tone-border);
+  background: var(--tone-tint);
+  color: var(--tone-fg);
+}
+.notice svg {
+  flex: none;
+  margin-top: 1px;
+}
+.notice__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* ---- History ----------------------------------------------------------- */
+/* Long unbreakable strings (filenames, hashes) must wrap rather than blow out
+   the table/modal width on mobile. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Pager under a paginated table. */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.pager__status {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-width: 8ch;
+  text-align: center;
+}
+
+/* ---- Frame detail modal ------------------------------------------------- */
+.fdetail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.fdetail__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.fdetail__legend {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.fdetail__dl {
+  display: grid;
+  /* minmax(0, 1fr) lets the value column shrink below its content's min-content
+     width so long paths/hashes wrap (via break-word) instead of overflowing. */
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+}
+.fdetail__dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.fdetail__dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+@media (max-width: 559px) {
+  .fdetail__dl {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 var(--space-4);
+  }
+  .fdetail__dt {
+    margin-top: var(--space-2);
+  }
+}
+
+/* ---- Logs -------------------------------------------------------------- */
+.log-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.log-line {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.log-line:last-child {
+  border-bottom: 0;
+}
+.log-line:hover {
+  background: var(--surface-2);
+}
+.log-line__time {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.log-line__level {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.log-line__level--error {
+  color: var(--problem-fg);
+}
+.log-line__level--warn {
+  color: var(--work-fg);
+}
+.log-line__level--info {
+  color: var(--info-fg);
+}
+.log-line__level--debug {
+  color: var(--text-faint);
+}
+.log-line__body {
+  min-width: 0;
+}
+.log-line__msg {
+  color: var(--text);
+  word-break: break-word;
+}
+.log-line__attrs {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+@media (max-width: 559px) {
+  .log-line {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* "Unsaved changes" cue next to the Settings save button — deliberately loud
+   (bold, bright red) so it's impossible to miss that a save is pending. */
+.unsaved-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-pill, 999px);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.01em;
+  color: #fff;
+  background: var(--problem-solid);
+  border: 1px solid var(--problem-solid);
+  white-space: nowrap;
+}
+.unsaved-pill svg {
+  color: #fff;
+}
+
+/* Live/paused toggle for the streaming app log. */
+.live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  min-height: 32px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.live-toggle:hover { color: var(--text); }
+.live-toggle .live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.live-toggle.is-live {
+  color: var(--safe-fg);
+  border-color: var(--safe-border);
+  background: var(--safe-tint);
+}
+.live-toggle.is-live .live-dot {
+  background: var(--safe-solid, var(--safe-fg));
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-toggle.is-live .live-dot { animation: none; }
+}
+
+/* ---- Live feed (Feed.tsx + the Devices pending panel) ------------------------
+ * The fleet feed is a virtualized list of <div> rows on a grid that lines up with
+ * a sticky header. "Pending transfer" is a dimmed inline label (no DB state, so
+ * not a StatusPill); a transferring row shows a compact bar; a final row shows the
+ * frame-state pill. Enter/leave animations apply only to live changes in view.
+ */
+.feed-card {
+  padding: 0;
+  overflow: hidden;
+}
+.feed-head,
+.feed-row {
+  display: grid;
+  grid-template-columns:
+    56px minmax(96px, 0.9fr) minmax(120px, 1.8fr) 64px 84px
+    minmax(140px, 1fr) 72px minmax(150px, 1.1fr) 96px 40px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-3);
+}
+.feed-head {
+  height: 40px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.feed-scroll {
+  max-height: 68vh;
+  overflow: auto;
+}
+.feed-row {
+  min-height: 56px;
+  height: 100%;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.feed-col-right {
+  text-align: right;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+.feed-device,
+.feed-source,
+.feed-coords {
+  min-width: 0;
+}
+.feed-type {
+  color: var(--text-muted);
+}
+.feed-when {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.feed-detail {
+  justify-self: end;
+}
+
+/* A discovered-but-not-yet-transferred frame: present but muted — "we see it". */
+.feed-pending {
+  color: var(--text-muted);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* The compact in-row transfer bar (reuses the .progress base). */
+.feed-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.feed-progress__bar {
+  display: block;
+  width: 72px;
+  flex: none;
+}
+.feed-progress__pct {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Live enter/leave. Enter animates the inner row (the wrapper carries the
+ * virtualizer's translateY, so animating it would fight the layout); leave fades
+ * the wrapper, which is deleted after the animation. */
+@keyframes feed-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.feed-rowwrap.is-entering .feed-row {
+  animation: feed-row-enter var(--dur-slow) var(--ease);
+}
+.feed-rowwrap.is-exiting {
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+/* The Devices Recent-transfers table reuses the merge engine; a leaving row there
+ * fades best-effort (no absolute wrapper to animate height). */
+tr.is-exiting {
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-rowwrap.is-entering .feed-row {
+    animation: none;
+  }
+}
+
+/* FITS preview thumbnail cell (FrameThumb) + lightbox tweaks. */
+.frame-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 35px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-inset);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.frame-thumb:hover {
+  border-color: var(--border-strong);
+}
+.frame-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.frame-thumb--empty {
+  cursor: default;
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--surface-2) 0,
+    var(--surface-2) 4px,
+    var(--surface-inset) 4px,
+    var(--surface-inset) 8px
+  );
+  opacity: 0.5;
+}
+/* Keep the lightbox above the app shell / dialogs. */
+.yarl__root {
+  z-index: 3000;
+}
+
+/* Inline preview inside the frame detail modal (opens the lightbox). */
+.fdetail-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-inset);
+  cursor: zoom-in;
+}
+.fdetail-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 340px;
+  object-fit: contain;
+}
+
+/* Astrometry table cells: keep the paired RA/Dec on one line and give the
+   mirror-flip marker a muted accent so it reads as a flag, not a glyph. */
+.astro-coords {
+  white-space: nowrap;
+}
+.astro-flip {
+  color: var(--accent, var(--text-muted));
+  font-weight: 600;
+}
+
+/* ---- Remotes ----------------------------------------------------------- */
+.remote-relay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--text-muted);
+}
+/* "Commander can't reach the relay since …" outgrows a phone's width, so this
+   pill wraps rather than keeping the shared pill's single line. */
+.remote-relay .aac-pill {
+  white-space: normal;
+}
+.remote-help {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+}
+.remote-block {
+  margin-top: var(--space-3);
+}
+.remote-block__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.remote-block__title:focus {
+  outline: none;
+}
+.remote-rigs li,
+.remote-warnings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) 0;
+  overflow-wrap: anywhere;
+}
+.remote-rigs li {
+  justify-content: space-between;
+}
+/* A reached rig reads as one line, "<name> reached through it", rather than
+   spread across the card the way a found device and its button are. */
+.remote-rigs--named li {
+  justify-content: flex-start;
+}
+.remote-cap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+}
+form.remote-cap {
+  align-items: flex-end;
+}
+.remote-prereqs,
+.remote-steps {
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.remote-advanced {
+  margin-top: var(--space-3);
+}
+.remote-advanced summary {
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+}
+.remote-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.remote-file__body {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+.remote-file__body--long {
+  max-height: 14rem;
+  overflow: auto;
+}
+/* The rig's own lines while its remote's tunnel is down: muted, under the facts. */
+.rig-remote-lines {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

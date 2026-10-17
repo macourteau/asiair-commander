@@ -1,0 +1,31 @@
+/*
+ * Live current-file copy widget, shared by the Dashboard and the Devices rig card
+ * (see TransferProgress.tsx). Kept in one place so the two readouts stay in step.
+ */
+.transfer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.transfer__file {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+/* Live throughput, sitting just left of the percent in the progress header. */
+.transfer__rate {
+  color: var(--text-muted);
+  margin-right: var(--space-2);
+}
+.progress {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.progress__bar {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width var(--dur-slow) var(--ease);
+}

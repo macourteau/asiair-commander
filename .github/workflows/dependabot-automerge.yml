@@ -1,0 +1,129 @@
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    # Gated on the PR's author rather than github.actor, which names whoever
+    # triggered this particular run (a re-run, or a push to the branch) and so
+    # does not prove the PR is Dependabot's.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # tailcat (the userspace WireGuard tunnel to remote sites) and tailscale.com
+      # (its direct dependency, pinned at a pseudo-version) carry the tunnel's
+      # wire format and behaviour, which a bump can change with no API break. A
+      # bump of either, alone or together, runs the gate tests before it may
+      # auto-merge; every other PR skips these steps.
+      - name: Detect a tailcat bump
+        id: tailcat
+        env:
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+        run: |
+          bump=false
+          IFS=',' read -ra names <<< "$DEPENDENCY_NAMES"
+          for n in "${names[@]}"; do
+            n="${n// /}"
+            if [ "$n" = "github.com/tailscale/tailcat" ] || [ "$n" = "tailscale.com" ]; then
+              bump=true
+            fi
+          done
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      # The full history and tags let the cross-version test build the previous
+      # release from its own source.
+      - name: Check out the bump
+        if: steps.tailcat.outputs.bump == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        if: steps.tailcat.outputs.bump == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pin Go toolchain
+        if: steps.tailcat.outputs.bump == 'true'
+        run: |
+          tc=$(awk '/^toolchain /{print $2}' go.mod)
+          [ -z "$tc" ] && tc="go$(awk '/^go /{print $2}' go.mod)"
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      # An API break fails the build; a behaviour change fails the wrapper's
+      # behaviour tests and the real-tunnel tests (a local relay, never public
+      # DERP); a wire break fails the cross-version test. The SPA is not built:
+      # the tunnel package does not embed it.
+      - name: Tailcat gate tests
+        id: gate
+        if: steps.tailcat.outputs.bump == 'true'
+        continue-on-error: true
+        env:
+          CGO_ENABLED: "0"
+          REMOTE_CROSSVERSION: "1"
+        run: |
+          go build ./...
+          go test -count=1 ./internal/remote/tunnel/...
+
+      # Not enabling auto-merge is not enough: a run that passed on an earlier
+      # push of this PR may have armed it, and the manual re-arm sweep in
+      # CLAUDE.md would arm it again. So disarm it, and label the PR, which the
+      # sweep skips. The disarm is checked by reading the PR back rather than by
+      # gh's exit status, which also fails when auto-merge was never enabled.
+      - name: Leave the bump for a human
+        if: steps.tailcat.outputs.bump == 'true' && steps.gate.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh pr merge "$PR_URL" --disable-auto || true
+          armed=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$armed" != "false" ]; then
+            echo "auto-merge is still armed on $PR_URL after the tailcat gate failed"
+            exit 1
+          fi
+          gh label create tailcat-gate-failed --repo "$GITHUB_REPOSITORY" --color B60205 \
+            --description "The tailcat gate failed; never re-arm auto-merge" || true
+          gh pr edit "$PR_URL" --add-label tailcat-gate-failed
+          gh pr comment "$PR_URL" --body "The tailcat gate failed, so auto-merge is disabled and this PR is labelled tailcat-gate-failed. This bump changes the tunnel's API, behaviour or wire format. Details: $RUN_URL. Review it by hand."
+
+      # A later push that passes the gate clears the label a failed run left.
+      - name: Clear a failed gate's label
+        if: steps.tailcat.outputs.bump == 'true' && steps.gate.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          labelled=$(gh pr view "$PR_URL" --json labels --jq 'any(.labels[]; .name == "tailcat-gate-failed")')
+          if [ "$labelled" = "true" ]; then
+            gh pr edit "$PR_URL" --remove-label tailcat-gate-failed
+          fi
+
+      # Every GitHub Actions bump auto-merges (their majors are frequent and
+      # low-risk here); for Go, npm, and Docker base images, everything except
+      # a major auto-merges. A major dependency bump is left for a human.
+      # Auto-merge waits for the required build-test check via branch
+      # protection before landing. A tailcat bump also needs its gate to pass.
+      - name: Approve and merge
+        if: >-
+          (steps.metadata.outputs.package-ecosystem == 'github_actions' ||
+          steps.metadata.outputs.update-type != 'version-update:semver-major') &&
+          (steps.tailcat.outputs.bump != 'true' || steps.gate.outcome == 'success')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review "$PR_URL" --approve
+          gh pr merge "$PR_URL" --auto --squash

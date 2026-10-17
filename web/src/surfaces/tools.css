@@ -1,0 +1,382 @@
+/*
+ * Tools page — frame retargeting (design routing-and-filing §9.7),
+ * re-file (design routing-and-filing §8.11) and device files
+ * (design device-file-browser). Built from the shared
+ * surfaces.css toolbar/notice/pager classes; this file carries only what's
+ * specific to those tools: the row checkbox, the preview lists, and the live
+ * apply-progress lists.
+ */
+
+/* A native checkbox, accent-colored and sized to match the touch-target minimum
+   used by every other interactive control in the design system. */
+.aac-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.aac-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---- Retarget preview --------------------------------------------------- */
+.retarget-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.retarget-preview__item {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.retarget-preview__item--ineligible {
+  border-color: var(--problem-border);
+  background: var(--problem-tint);
+}
+.retarget-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.retarget-preview__paths {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.retarget-preview__paths svg {
+  flex: none;
+  color: var(--text-faint);
+}
+
+/* ---- Apply progress ------------------------------------------------------ */
+.retarget-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.retarget-progress__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* ---- Re-file: the grouped diff and its outcomes -------------------------- */
+/* One row per `old dir → new dir` move, since selection is by group. The
+   checkbox sits outside the body so a two-line path block stays aligned with it. */
+.refile-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.refile-group {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.refile-group__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.refile-group__body p {
+  margin: 0;
+}
+.refile-group__paths {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.refile-group__paths svg {
+  flex: none;
+  color: var(--text-faint);
+}
+.refile-outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.refile-outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* ---- File browser: two panes on the devices themselves ------------------- */
+/* Side by side on wide screens, stacked below; the "Left"/"Right" headings stay
+   when stacked, and the copy button names its destination rig. */
+.dfb-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+@media (min-width: 960px) {
+  .dfb-panes {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.dfb-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  /* The listing adapts to the pane's width, not the viewport's: side by side
+     on a desktop a pane can be as cramped as a phone. */
+  container-type: inline-size;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+/* The always-mounted live container for a pane notice takes no room while
+   empty: the pane's gap would otherwise leave a blank line. */
+.dfb-status:empty {
+  margin-top: calc(-1 * var(--space-3));
+}
+.dfb-pane__title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.dfb-crumbs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.dfb-crumbs__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.dfb-crumbs__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.dfb-crumbs__item + .dfb-crumbs__item::before {
+  content: "›";
+  color: var(--text-faint);
+}
+/* A folder name or breadcrumb segment that opens it: a text button. */
+.dfb-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+.dfb-link:hover {
+  text-decoration: underline;
+}
+.dfb-link[aria-current] {
+  color: var(--text);
+  font-weight: var(--weight-semibold);
+}
+.dfb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* The copy arrow points at the other pane: down from Left and up from Right
+   while they stack, left and right once they sit side by side. */
+.dfb-copy-icon--left {
+  transform: rotate(90deg);
+}
+.dfb-copy-icon--right {
+  transform: rotate(-90deg);
+}
+@media (min-width: 960px) {
+  .dfb-copy-icon--left {
+    transform: none;
+  }
+  .dfb-copy-icon--right {
+    transform: scaleX(-1);
+  }
+}
+/* A file name is the label of its checkbox. */
+.dfb-file {
+  cursor: pointer;
+}
+.dfb-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dfb-reason {
+  margin: 0;
+}
+.dfb-listing:focus {
+  outline: none;
+}
+.dfb-loading {
+  padding: var(--space-5);
+}
+.dfb-empty {
+  padding: var(--space-2) 0;
+}
+.dfb-problem .aac-empty__icon {
+  color: var(--problem-fg);
+}
+.dfb-name {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.dfb-name svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--text-faint);
+}
+.dfb-name__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+/* The mtime sits in its own column in a wide pane and under the name in a
+   narrow one, so a long frame name keeps room instead of wrapping into a thin
+   column (or widening the table). */
+.dfb-name__meta {
+  display: none;
+  flex-basis: 100%;
+}
+.dfb-table .aac-table td {
+  vertical-align: top;
+}
+/* The checkbox, Size and Modified columns shrink to their content (a 1% width
+   in an auto-layout table), so Name takes the rest of the pane; a name still
+   wraps anywhere (break-anywhere) when even that is too narrow, as on mobile. */
+.dfb-col-fit {
+  width: 1%;
+  white-space: nowrap;
+}
+/* Below the mobile breakpoint the page scrolls under the shell's sticky top
+   bar, so a sticky toolbar parks beneath it rather than behind it. */
+.dfb-pane {
+  --dfb-sticky-top: 0px;
+}
+@media (max-width: 959.98px) {
+  .dfb-pane {
+    --dfb-sticky-top: var(--topbar-height);
+  }
+}
+@container (max-width: 600px) {
+  .dfb-name__meta {
+    display: block;
+  }
+  /* A narrow pane is a long one: ticking a file deep in the list must not send
+     the user back up to reach Copy or Delete, so the toolbar stays in view while
+     its pane does. It sits under the top bar and every overlay (z-index 1). */
+  .dfb-toolbar {
+    position: sticky;
+    top: var(--dfb-sticky-top);
+    z-index: 1;
+    margin: 0 calc(-1 * var(--space-3));
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .dfb-col-mtime {
+    display: none;
+  }
+  .dfb-table .aac-table th,
+  .dfb-table .aac-table td {
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* Progress bar of a copy or delete run. */
+.dfb-bar {
+  height: 8px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.dfb-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.dfb-hint {
+  color: var(--problem-fg);
+}
+.dfb-confirm p {
+  margin: 0;
+}
+/* Overwrite / Skip, one radio group per conflict row. */
+.dfb-segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.dfb-segmented__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.dfb-segmented__opt + .dfb-segmented__opt {
+  border-left: 1px solid var(--border);
+}
+.dfb-segmented__opt:has(input:checked) {
+  background: var(--surface-2);
+  font-weight: var(--weight-semibold);
+}
+.dfb-mobile-label {
+  display: none;
+}
+/* The conflict and report tables become stacked rows on a phone: the name on its
+   own line, the details under it, the control last. */
+@media (max-width: 559px) {
+  .dfb-stack-table .aac-table thead {
+    display: none;
+  }
+  .dfb-stack-table .aac-table,
+  .dfb-stack-table .aac-table tbody,
+  .dfb-stack-table .aac-table tr,
+  .dfb-stack-table .aac-table td {
+    display: block;
+    width: 100%;
+  }
+  .dfb-stack-table .aac-table tr {
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .dfb-stack-table .aac-table td {
+    border-bottom: none;
+    padding: var(--space-1) var(--space-3);
+  }
+  .dfb-mobile-label {
+    display: inline;
+  }
+}

@@ -1,0 +1,211 @@
+/*
+ * Dashboard — the morning-glance board. Dual-density: on mobile, big glanceable
+ * cards where secondary detail collapses behind an expander; on desktop, a
+ * denser grid where every card shows shares, progress, and timestamps at once.
+ */
+
+.dash-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.dash-head__title {
+  font-size: var(--text-xl);
+  letter-spacing: -0.01em;
+}
+.dash-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.dash-head__meta .mono {
+  color: var(--text);
+}
+
+.dash-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: 1fr;
+}
+@media (min-width: 680px) {
+  .dash-grid {
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  }
+}
+
+/* ---- Rig card --------------------------------------------------------- */
+.rigcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+.rigcard__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.rigcard__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+/* The rig's status pill, right-aligned in the card header. */
+.rigcard__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+/* The signature: the "safe to power off" hero band. */
+.rigcard__hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--tone-tint);
+  border: 1px solid var(--tone-border);
+  border-left: 4px solid var(--tone-solid);
+}
+.rigcard__hero-icon {
+  flex: none;
+  color: var(--tone-fg);
+}
+.rigcard__hero-label {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--tone-fg);
+  line-height: var(--leading-tight);
+}
+.rigcard__hero-help {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin-top: 2px;
+}
+
+/* Drain fact — separate from "safe": freeing space vs. losing-nothing. */
+.rigcard__drain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+}
+.rigcard__drain svg {
+  flex: none;
+}
+
+.rigcard__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+.stat__label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.stat__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-base);
+}
+.stat--full {
+  grid-column: 1 / -1;
+}
+
+.rigcard__shares {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.share-row__name {
+  color: var(--text-muted);
+  min-width: 0;
+}
+.share-row__free {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.rigcard__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--problem-fg);
+  background: var(--problem-tint);
+  border: 1px solid var(--problem-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+.rigcard__error svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.rigcard__alerts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Expander — visible/used on mobile only; desktop shows detail unconditionally. */
+.rigcard__expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 40px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.rigcard__expand:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.rigcard__expand svg {
+  transition: transform var(--dur-base) var(--ease);
+}
+.rigcard__expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.rigcard__detail {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.rigcard__detail--open {
+  display: flex;
+}
+@media (min-width: 680px) {
+  /* Desktop density: always show detail, hide the expander. */
+  .rigcard__detail {
+    display: flex;
+  }
+  .rigcard__expand {
+    display: none;
+  }
+}

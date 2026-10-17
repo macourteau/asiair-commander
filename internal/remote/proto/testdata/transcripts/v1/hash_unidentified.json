@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "op": "hash",
+  "request": {
+    "v": 1,
+    "call_id": "c-hash-0002",
+    "op": "hash",
+    "hash": {"ip": "192.168.1.75", "share": "EMMC Images", "path": "Autorun/Light/NGC7000/Light_NGC7000_002.fit", "user": "guest", "password": "12345678"}
+  },
+  "replies": [
+    {
+      "v": 1,
+      "call_id": "c-hash-0002",
+      "kind": "result",
+      "hash": {
+        "guid": "",
+        "cpu_id": "",
+        "whole": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "data": "",
+        "size": 2880,
+        "mtime_ns": 1759752000000000000
+      }
+    }
+  ]
+}

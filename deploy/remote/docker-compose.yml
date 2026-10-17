@@ -1,0 +1,75 @@
+# The remote site's compose file: the remote role of ASIAIR Commander plus the
+# watchtower that keeps it on the latest release.
+#
+# The env variable names (ASIAIR_REMOTE_PAIRING, REMOTE_TAG, TZ) and this file's
+# shape are a forward-compatible contract: every later image runs under every
+# earlier copy of this file, because the copy on a remote PC is never refreshed
+# by anything. Change neither a name nor a meaning.
+#
+# Usage: copy this file and .env.example (as .env) to the remote PC, put the
+# pairing Commander showed in .env, and run `docker compose up -d`.
+# See the "Remote sites" section of DOCKER_README.md.
+
+# Fixes the project name, which would otherwise be the directory's.
+name: asiair-remote
+
+services:
+  remote:
+    image: ghcr.io/macourteau/asiair-commander:${REMOTE_TAG:-latest}
+    container_name: asiair-remote
+    command: ["remote"]
+    # Host networking is needed to broadcast on the LAN to find the ASIAIRs, and
+    # it helps the tunnel hole-punch.
+    network_mode: host
+    env_file: .env
+    restart: unless-stopped
+    # No named volume: the remote keeps no state. (The image still declares
+    # VOLUME /data, which gives the container an anonymous volume it never
+    # writes.)
+    #
+    # Overrides the image's healthcheck, which asks Commander's web port. This
+    # one asks the remote's loopback endpoint on 127.0.0.1:4748: healthy means
+    # the tunnel server is up, the pairing is loaded and the relay home region
+    # is connected.
+    healthcheck:
+      test: ["CMD", "/asiair-commander", "remote", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      # Watchtower acts only on containers carrying its own scope.
+      - com.centurylinklabs.watchtower.scope=asiair-remote
+
+  watchtower:
+    # Follows upstream's moving tag, never a pinned version: a pin in a compose
+    # file on a remote PC could never move.
+    image: nickfedor/watchtower:latest
+    container_name: asiair-remote-watchtower
+    restart: unless-stopped
+    environment:
+      # Only containers labelled with this scope (this project's remote, and
+      # watchtower itself) are touched; other containers on the host are not.
+      WATCHTOWER_SCOPE: asiair-remote
+      # Remove the superseded image after each update.
+      WATCHTOWER_CLEANUP: "true"
+      # Daily at 14:00 in TZ (six-field cron: seconds first), so a restart for
+      # an update lands in daytime, away from a night's capture. Set TZ in .env.
+      WATCHTOWER_SCHEDULE: "0 0 14 * * *"
+      TZ: ${TZ:-UTC}
+    volumes:
+      # The image is public, so watchtower pulls it without registry
+      # credentials and needs only the Docker socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - com.centurylinklabs.watchtower.scope=asiair-remote

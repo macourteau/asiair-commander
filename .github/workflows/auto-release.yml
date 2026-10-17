@@ -1,0 +1,78 @@
+name: Auto-release
+
+# Daily: if shippable code changed since the last v* tag, derive the next version
+# from Conventional Commits and hand it to the release workflow, which tags the commit
+# only after its build succeeds. Nothing here writes a tag — a tag created before the
+# build means a failed build leaves one behind, and the next run of this job reads that
+# orphan as the latest release, dropping its commits from every future release's notes.
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for releasable changes and dispatch the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing v* tag — create the first one (e.g. v0.1.0) to bootstrap"
+            exit 0
+          fi
+          echo "Latest tag: $LATEST_TAG"
+
+          # Commits since that tag that touch shippable code (not docs/CI/screenshots).
+          CODE_COMMITS=$(git log "$LATEST_TAG"..HEAD --format="%H" -- \
+            '*.go' 'go.mod' 'go.sum' 'web/**' 'Makefile' 'deploy/**' 'third_party/**')
+
+          if [ -z "$CODE_COMMITS" ]; then
+            echo "No shippable changes since $LATEST_TAG — skipping"
+            exit 0
+          fi
+
+          COMMIT_COUNT=$(echo "$CODE_COMMITS" | wc -l | tr -d ' ')
+          echo "$COMMIT_COUNT code commit(s) since $LATEST_TAG"
+
+          # Derive the bump from Conventional Commit subjects.
+          BUMP="patch"
+          while IFS= read -r SHA; do
+            MSG=$(git log -1 --format="%B" "$SHA")
+            if echo "$MSG" | grep -qiE "^[a-z]+(\(.+\))?!:|BREAKING CHANGE:"; then
+              BUMP="major"
+              break
+            fi
+            if echo "$MSG" | grep -qiE "^feat(\(.+\))?:"; then
+              BUMP="minor"
+            fi
+          done <<< "$CODE_COMMITS"
+          echo "Bump type: $BUMP"
+
+          CURRENT="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          SHA=$(git rev-parse HEAD)
+          echo "Dispatching release $NEW_TAG at $SHA"
+
+          # release.yml tags $SHA itself, once the installer has built. If it fails,
+          # no tag exists, so tomorrow's run derives the same version from the same
+          # commits and retries on its own.
+          gh workflow run release.yml --ref main -f version="$NEW_TAG" -f sha="$SHA"

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "op": "hash",
+  "request": {
+    "v": 1,
+    "call_id": "c-hash-0003",
+    "op": "hash",
+    "hash": {"ip": "192.168.1.99", "share": "EMMC Images", "path": "Autorun/Light/NGC7000/Light_NGC7000_001.fit", "user": "guest", "password": "12345678"}
+  },
+  "replies": [
+    {"v": 1, "call_id": "c-hash-0003", "kind": "error", "error": {"code": "refused", "message": "address is not on the remote's forwarding allowlist"}}
+  ]
+}

@@ -1,0 +1,91 @@
+/* Centered layout for the Login and Setup surfaces. */
+.auth-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  gap: var(--space-6);
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.auth-brand__mark {
+  color: var(--accent);
+}
+.auth-wordmark {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.01em;
+}
+.auth-wordmark small {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+}
+.auth-card--wide {
+  max-width: 560px;
+}
+.auth-title {
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-1);
+}
+.auth-lede {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  margin-bottom: var(--space-5);
+}
+.auth-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.auth-section > legend,
+.auth-section__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 var(--space-1);
+  margin-bottom: var(--space-3);
+}
+.auth-note {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: var(--info-tint);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.auth-note svg {
+  flex: none;
+  color: var(--info-fg);
+  margin-top: 1px;
+}
+.auth-formerror {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  color: var(--problem-fg);
+  background: var(--problem-tint);
+  border: 1px solid var(--problem-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.auth-formerror svg {
+  flex: none;
+}
