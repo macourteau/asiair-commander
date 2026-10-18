@@ -2164,7 +2164,7 @@ function RigEditor({
               <Field
                 label="Device"
                 help="Commander tracks this ASIAIR by its stable device id, so it follows the device across reboots and DHCP changes automatically."
-                example={deviceFacts({
+                note={deviceFacts({
                   ssid: form.ssid,
                   address: form.address || form.host,
                   model: form.model,

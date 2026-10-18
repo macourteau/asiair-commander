@@ -413,7 +413,7 @@ export function Setup() {
               label="Light frames folder"
               required
               help="The destination for your imaging subs, sorted into per-target folders."
-              example={hasDefaults ? undefined : "e.g. D:\\Astro\\Lights"}
+              example={hasDefaults ? undefined : "D:\\Astro\\Lights"}
               error={fieldErr.light}
             >
               {(f) => (
@@ -428,7 +428,7 @@ export function Setup() {
             <Field
               label="Calibration frames folder"
               help="Darks, flats, and bias. Leave blank to keep them with the lights."
-              example={hasDefaults ? undefined : "e.g. D:\\Astro\\Calibration"}
+              example={hasDefaults ? undefined : "D:\\Astro\\Calibration"}
             >
               {(f) => (
                 <TextInput
@@ -443,7 +443,7 @@ export function Setup() {
               label="Temporary folder (same drive as your pictures)"
               required
               help="Files wait here while they copy, before they're filed."
-              example={hasDefaults ? undefined : "e.g. D:\\Astro\\_staging"}
+              example={hasDefaults ? undefined : "D:\\Astro\\_staging"}
               error={fieldErr.staging}
             >
               {(f) => (
@@ -458,7 +458,7 @@ export function Setup() {
             <Field
               label="Logs folder"
               help="Where pulled device logs are kept. Can live on a different drive."
-              example={hasDefaults ? undefined : "e.g. D:\\Astro\\logs"}
+              example={hasDefaults ? undefined : "D:\\Astro\\logs"}
             >
               {(f) => (
                 <TextInput

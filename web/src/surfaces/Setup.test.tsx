@@ -71,7 +71,9 @@ describe("Setup — folder defaults", () => {
     await waitFor(() => expect(getSetupStatus).toHaveBeenCalled());
     expect(lightInput().value).toBe("");
     expect(stagingInput().value).toBe("");
-    expect(screen.getByText("e.g. D:\\Astro\\Lights")).toBeTruthy();
+    const ex = lightInput().getAttribute("aria-describedby")!.split(" ")
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(ex).toContain("e.g. D:\\Astro\\Lights");
   });
 
   it("keeps what the operator typed before the server answered", async () => {

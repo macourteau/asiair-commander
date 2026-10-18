@@ -2,7 +2,11 @@
  * Field / FormRow — the labelled form wrapper that enforces the brief's copy
  * rules: every non-obvious control gets a plain-language help line AND, where it
  * clarifies faster than prose, a concrete example (e.g. "'NGC 7000' becomes
- * 'NGC7000'"). The label, help, example, and error are wired to the control via
+ * 'NGC7000'"). The example renders behind an "e.g." prefix, because a bare value
+ * sitting above the input reads as the field's current value. A line that is not
+ * an example but a live readout of the field (a unit conversion, facts about the
+ * bound device) goes in `note`, which renders the same way without the prefix.
+ * The label, help, example, note, and error are wired to the control via
  * aria-describedby so a screen reader reads them with the field.
  *
  * Use the `useField` helper to get the ids to spread onto your input, OR use the
@@ -25,8 +29,11 @@ export interface FieldProps {
   label: ReactNode;
   /** Plain-language guidance shown under the label. */
   help?: ReactNode;
-  /** A concrete example that demonstrates the control (rendered in mono, dimmed). */
+  /** A concrete example that demonstrates the control (rendered in mono, dimmed,
+   * after an "e.g." prefix the component adds — pass the bare example). */
   example?: ReactNode;
+  /** A live readout about the field's value (rendered like an example, with no prefix). */
+  note?: ReactNode;
   /** Actionable error — what happened and what to do. Presence marks the field invalid. */
   error?: ReactNode;
   required?: boolean;
@@ -38,6 +45,7 @@ export function Field({
   label,
   help,
   example,
+  note,
   error,
   required = false,
   children,
@@ -45,9 +53,10 @@ export function Field({
   const base = useId();
   const helpId = help ? `${base}-help` : undefined;
   const exampleId = example ? `${base}-ex` : undefined;
+  const noteId = note ? `${base}-note` : undefined;
   const errorId = error ? `${base}-err` : undefined;
   const describedBy =
-    [helpId, exampleId, errorId].filter(Boolean).join(" ") || undefined;
+    [helpId, exampleId, noteId, errorId].filter(Boolean).join(" ") || undefined;
 
   return (
     <div className="aac-field">
@@ -65,8 +74,14 @@ export function Field({
         </p>
       )}
       {example && (
-        <p className="aac-field__example mono" id={exampleId}>
-          {example}
+        <p className="aac-field__example" id={exampleId}>
+          e.g.{" "}
+          <span className="mono">{example}</span>
+        </p>
+      )}
+      {note && (
+        <p className="aac-field__example mono" id={noteId}>
+          {note}
         </p>
       )}
       {children({
