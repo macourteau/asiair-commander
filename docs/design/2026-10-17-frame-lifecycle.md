@@ -2038,10 +2038,10 @@ publishes the counts as `RigStatus.DeviceFrames` (`device_frames`), and the SPA 
 since startup: the card reads "Device not checked yet". When every count is zero but uncopied
 frames remain, the line is hidden, as the transfer readout and the verdict already say so.
 
-**Where the counts come from.** One store query, `DeviceBreakdown(rig, graceCutoff)`, replaces
-the single resident count at the same three call sites: the end-of-listing status, the throttled
-live refresh, and the post-dismiss recompute. Each bucket is a conditional aggregate over the
-rig's resident rows (`idx_frames_rig_state`), so the scan costs what the single count cost and a
+**Where the counts come from.** One store query, `DeviceBreakdown(rig, graceCutoff)`, feeds
+three call sites: the end-of-listing status, the throttled live refresh, and the post-dismiss
+recompute. Each bucket is a conditional aggregate over the
+rig's resident rows (`idx_frames_rig_state`), so the scan costs what a single count would and a
 poll runs no extra query and no per-frame work. The grace cutoff is the delete pass's own,
 `now − EffectiveGrace(profile)`, compared with `<=` as `DeletionEligible` does, so a frame moves
 from `in_grace` to `due` at the moment the delete pass would take it. The `stuck` bucket is the
@@ -2063,12 +2063,17 @@ checked yet" in place.
 - "4 still on the device: 4 due for removal", while the delete pass works through them.
 - "1 removed from the library, leaving the device", with a link to the rig's missing-frames panel
   in Devices.
-- "12 kept on the device" with the **keep originals** badge, and any stuck frames named after it.
+- "12 kept on the device" with the **keep originals** badge, and any stuck frames named after it:
+  "12 kept on the device, 2 can't be removed automatically", with the link.
 - "Device drained — space freed".
 
 The badge appears only while `in_grace` is non-zero. The stuck segment takes the problem tone,
-and the link uses the same builder as the backlog alert's (`web/src/util/alerts.ts`). Devices'
-live line renders the same reasons from the same helper in compact form.
+and its "Why they stay" link uses the same builder as the backlog alert's
+(`web/src/util/alerts.ts`); the culled segment's link reads "Missing frames". Each link's
+accessible name starts with its visible text and names the rig. A keep-originals rig has no
+drained state to fall back on, so its line always shows, "0 kept on the device" included.
+Devices' live line renders the same sentence from the same helper (`web/src/util/drain.ts`) in
+compact form: no badge and no links, since the rig's panels sit just below it.
 
 **What this leaves alone.** The verdict (§14.1–§14.4) does not read these counts: frames awaiting
 deletion never count against Yes, and an Unknown verdict keeps its own reason (§14.3). The
@@ -2085,7 +2090,7 @@ than kept beside the counts.
 Tests: `TestDeviceBreakdown` (store: every bucket built through `UpsertFrame`, the grace boundary,
 the H12 pair, a failed row with no `dest_path`, culled `unclassified` outside `stuck`, and `stuck`
 equal to `ListNeverDeletable`'s total on the same rows); `TestDeviceFrames` (the pure derivation,
-including `drained` and keep-originals, replacing the `drainLabel` table);
+including `drained` and keep-originals);
 `TestDeviceLineSeparatesStuckFromGrace` (worker: a held frame beside frames in grace);
 `TestDeviceLineCountsFailedFrames` (worker: a failed-only device is stuck, not hidden);
 `TestDismissBeforeListingKeepsUnchecked`; and vitest for the wording and the badge rule beside

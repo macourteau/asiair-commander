@@ -92,6 +92,6 @@ func (w *Worker) discardOne(ctx context.Context, frameID int64) error {
 
 	w.ackResolvedUnclassified(ctx) // sweeps this rig's resolved per-frame unclassified alerts
 	w.maybeAckBacklog(ctx)         // auto-acks the aggregate alert if it's resolved
-	w.recomputeCounters(ctx)       // recompute resident/"kept" + tonight, then publish
+	w.recomputeCounters(ctx)       // recompute the device line + tonight, then publish
 	return nil
 }

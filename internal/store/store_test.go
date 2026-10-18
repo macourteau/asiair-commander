@@ -550,13 +550,78 @@ func TestCountsDedupeByDestPath(t *testing.T) {
 	if tonight != 3 {
 		t.Errorf("CountFramesTonight = %d, want 3 (deduped)", tonight)
 	}
-	resident, err := s.ResidentCount(ctx, "r")
+	counts, err := s.DeviceBreakdown(ctx, "r", 1000)
 	if err != nil {
-		t.Fatalf("ResidentCount: %v", err)
+		t.Fatalf("DeviceBreakdown: %v", err)
 	}
-	// resident distinct dest_paths: shared (once), other.fit = 2 (deleted excluded)
-	if resident != 2 {
-		t.Errorf("ResidentCount = %d, want 2 (deduped, deleted excluded)", resident)
+	// still on the device, in grace: shared (once), other.fit = 2 (deleted excluded)
+	if counts.InGrace != 2 {
+		t.Errorf("DeviceBreakdown in grace = %d, want 2 (deduped, deleted excluded)", counts.InGrace)
+	}
+}
+
+// TestDeviceBreakdown pins each bucket of the device line (design frame-lifecycle
+// §14.5): grace is the delete pass's own cutoff compared as DeletionEligible does,
+// an H12 pair is one frame, a failed row with no dest_path still counts, a culled
+// unclassified frame is leaving rather than stuck, and stuck is exactly the
+// never-deletable list the backlog alert links to.
+func TestDeviceBreakdown(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	const cutoff = int64(10_000)
+	row := func(share, path string, st model.FrameState, pulled int64, dest string) *model.Frame {
+		return &model.Frame{RigID: "r", SourceShare: share, SourcePath: path, Size: 1, Mtime: 1,
+			State: st, PulledAt: pulled, DestPath: dest, SHA256: "aa"}
+	}
+	seed := []*model.Frame{
+		// In grace: an H12 pair (two rows, one dest_path) and one a second past the cutoff.
+		row("Udisk Images", "Autorun/g1.fit", model.StateVerified, cutoff+100, "g1.fit"),
+		row("EMMC Images", "Autorun/g1.fit", model.StateVerified, cutoff+100, "g1.fit"),
+		row("EMMC Images", "Autorun/g2.fit", model.StateVerified, cutoff+1, "g2.fit"),
+		// Due: exactly at the cutoff (DeletionEligible's <=) and well past it.
+		row("EMMC Images", "Autorun/d1.fit", model.StateVerified, cutoff, "d1.fit"),
+		row("EMMC Images", "Autorun/d2.fit", model.StateVerified, cutoff-100, "d2.fit"),
+		// Culled: a verified frame still in grace and an unclassified one, both marked missing.
+		row("EMMC Images", "Autorun/c1.fit", model.StateVerified, cutoff+50, "c1.fit"),
+		row("EMMC Images", "Autorun/c2.fit", model.StateUnclassified, cutoff-50, "c2.fit"),
+		// Stuck: unclassified not culled, held, and a failed row that never got a dest_path.
+		row("EMMC Images", "Autorun/u.fit", model.StateUnclassified, cutoff-50, "u.fit"),
+		row("EMMC Images", "Autorun/h.fit", model.StateHeld, cutoff-50, "h.fit"),
+		{RigID: "r", SourceShare: "EMMC Images", SourcePath: "Autorun/f.fit", Size: 1, Mtime: 1, State: model.StateFailed},
+		// Not on the device, or another rig's.
+		row("EMMC Images", "Autorun/x.fit", model.StateDeleted, cutoff-50, "x.fit"),
+		row("EMMC Images", "Autorun/z.fit", model.StateDismissed, 0, ""),
+		{RigID: "other", SourceShare: "EMMC Images", SourcePath: "Autorun/o.fit", Size: 1, Mtime: 1,
+			State: model.StateHeld, PulledAt: cutoff - 50, DestPath: "o.fit"},
+	}
+	for _, f := range seed {
+		if err := s.UpsertFrame(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		if f.SourcePath == "Autorun/c1.fit" || f.SourcePath == "Autorun/c2.fit" {
+			if err := s.SetFrameMissing(ctx, f.ID, cutoff); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	got, err := s.DeviceBreakdown(ctx, "r", cutoff)
+	if err != nil {
+		t.Fatalf("DeviceBreakdown: %v", err)
+	}
+	want := DeviceCounts{InGrace: 2, Due: 2, Culled: 2, Stuck: 3}
+	if got != want {
+		t.Fatalf("DeviceBreakdown = %+v, want %+v", got, want)
+	}
+
+	// The stuck count and the backlog alert's list come from one predicate.
+	if _, total, err := s.ListNeverDeletable(ctx, "r", 0, 50); err != nil || total != got.Stuck {
+		t.Fatalf("ListNeverDeletable total = %d (err %v), want the stuck count %d", total, err, got.Stuck)
+	}
+
+	// A frame moves from in grace to due at the moment the delete pass would take it.
+	if got, _ := s.DeviceBreakdown(ctx, "r", cutoff+1); got.InGrace != 1 || got.Due != 3 {
+		t.Fatalf("one second later = %+v, want 1 in grace and 3 due", got)
 	}
 }
 

@@ -327,7 +327,7 @@ func (w *Worker) pullPhase(ctx context.Context, cfg *model.Config, cy cycle, dev
 			readyToCopy++
 		}
 		w.devicePending = pendingWork
-		w.refreshLiveCounters(ctx, profile, cl.Offset()) // live "transferred tonight" + "kept"/"resident" counts + next-frame prediction over SSE
+		w.refreshLiveCounters(ctx, profile, cl.Offset()) // live "transferred tonight" + device-line counts + next-frame prediction over SSE
 	}
 
 	// The orphan sweep deletes parentless preview/thumbnail files from the DEVICE,

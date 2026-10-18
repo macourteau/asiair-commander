@@ -56,6 +56,8 @@ import { MonitoringPill } from "./MonitoringPill";
 import { NextFrame } from "./NextFrame";
 import { RigActions } from "./RigActions";
 import { WaitingToSettle } from "./WaitingToSettle";
+import { DeviceLineText } from "./DeviceLine";
+import { deviceLine } from "../util/drain";
 import { rigIdFromField, splitProblems } from "../util/labels";
 import { MISSING_PANEL, UNCLASSIFIED_PANEL } from "../util/alerts";
 import { fieldErrors } from "../util/fieldErrors";
@@ -420,6 +422,24 @@ export function Devices() {
 
 /* ---- Rig list item ------------------------------------------------------ */
 
+/** The device line in compact form: the same reasons as the Dashboard card's,
+ *  without its badge and links (the rig's panels sit right below). */
+function DeviceLineCompact({ rig }: { rig: RigStatus }) {
+  const line = deviceLine(rig.device_frames, rig.keep_originals, rig.id, rig.name || rig.id);
+  if (line.kind === "hidden") return null;
+  return (
+    <span className="rig-item__drain">
+      {line.kind === "unchecked" ? (
+        "Device not checked yet"
+      ) : line.kind === "drained" ? (
+        "Device drained"
+      ) : (
+        <DeviceLineText parts={line.parts} />
+      )}
+    </span>
+  );
+}
+
 function RigItem({
   rig,
   openPanel,
@@ -588,7 +608,7 @@ function RigItem({
               <span className="stat__label">Transferred tonight</span>{" "}
               <span className="stat__value">{live.frames_tonight}</span>
             </span>
-            {live.drain && <span className="rig-item__drain mono">{live.drain}</span>}
+            <DeviceLineCompact rig={live} />
           </div>
           <WaitingToSettle count={live.waiting_to_settle} />
           <NextFrame

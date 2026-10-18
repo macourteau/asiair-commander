@@ -20,7 +20,7 @@ var errNoSuchDevice = errors.New("A device which does not exist was specified.")
 // TestStagingFlushFaultPausesPullsAndAlerts reproduces a destination that answers
 // its free-space query but refuses to flush: the fault must stop the cycle after
 // the first frame, raise a rig-scoped alert, put the reason on the card, and
-// never let the drain line read "drained" over frames that were never copied.
+// never let the device line read drained over frames that were never copied.
 func TestStagingFlushFaultPausesPullsAndAlerts(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	data := fixture(t, "asiair_light_2600mm_ha.fit")
@@ -54,8 +54,8 @@ func TestStagingFlushFaultPausesPullsAndAlerts(t *testing.T) {
 	if st.SafeToPowerOff == model.SafeYes {
 		t.Fatal("a rig with uncopied frames must not read safe")
 	}
-	if st.Drain == "drained" {
-		t.Fatal(`drain reads "drained" while three uncopied frames sit on the device`)
+	if st.DeviceFrames != nil && st.DeviceFrames.Drained {
+		t.Fatal("device line reads drained while three uncopied frames sit on the device")
 	}
 	// The loop still walks every frame (it only skips the copies), so the pending
 	// set is complete and holds all three.
@@ -118,8 +118,8 @@ func TestStagingWriteFaultProbesInsteadOfStreaming(t *testing.T) {
 	if st.SafeToPowerOff == model.SafeYes {
 		t.Fatal("reads safe to power off while an uncopied frame sits on the device behind a write fault")
 	}
-	if st.Drain == "drained" {
-		t.Fatal(`drain reads "drained" while an uncopied frame sits on the device behind a write fault`)
+	if st.DeviceFrames != nil && st.DeviceFrames.Drained {
+		t.Fatal("device line reads drained while an uncopied frame sits on the device behind a write fault")
 	}
 	if len(st.Pending) != 1 || !st.PendingListed {
 		t.Fatalf("pending=%v listed=%v, want the uncopied frame in a complete pending set", st.Pending, st.PendingListed)
@@ -152,25 +152,6 @@ func TestStagingWriteFaultProbesInsteadOfStreaming(t *testing.T) {
 	for _, a := range alerts {
 		if a.Category == model.AlertDestinationUnavailable {
 			t.Fatalf("rig-scoped write-fault alert still unacked after recovery: %+v", a)
-		}
-	}
-}
-
-func TestDrainLabel(t *testing.T) {
-	for _, tc := range []struct {
-		resident, pending int
-		keep              bool
-		want              string
-	}{
-		{0, 0, false, "drained"},
-		{0, 3, false, ""}, // nothing copied yet: not drained
-		{2, 3, false, "2 resident"},
-		{2, 0, false, "2 resident"},
-		{0, 3, true, "0 kept"},
-		{4, 0, true, "4 kept"},
-	} {
-		if got := drainLabel(tc.resident, tc.pending, tc.keep); got != tc.want {
-			t.Errorf("drainLabel(%d, %d, %v)=%q, want %q", tc.resident, tc.pending, tc.keep, got, tc.want)
 		}
 	}
 }

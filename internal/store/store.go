@@ -140,7 +140,9 @@ type Store interface {
 	FramesAwaitingRestore(ctx context.Context, rigID string) ([]model.Frame, error)
 	CountOutsideRoots(ctx context.Context, rigID string, roots []string) (int, error)
 	BytesPulledSince(ctx context.Context, since int64) (int64, error)
-	ResidentCount(ctx context.Context, rigID string) (int, error)
+	// DeviceBreakdown counts the rig's frames still on the device by why each one
+	// stays, against the delete pass's grace cutoff (design frame-lifecycle §14.5).
+	DeviceBreakdown(ctx context.Context, rigID string, graceCutoff int64) (DeviceCounts, error)
 	// ResidentLeads returns, distinct, the lead (first two segments of a deeper
 	// path, else the first) of every resident row's source path on share.
 	ResidentLeads(ctx context.Context, rigID, share string) ([]string, error)
@@ -1564,20 +1566,47 @@ func (s *sqlStore) BytesPulledSince(ctx context.Context, since int64) (int64, er
 	return n, nil
 }
 
-// ResidentCount counts distinct dest_path frames still on the device (state IN
-// verified, unclassified, held, failed), deduped by dest_path (design
-// architecture §7).
-func (s *sqlStore) ResidentCount(ctx context.Context, rigID string) (int, error) {
-	placeholders, args := stateInClause(rigID, residentStates)
-	var n int
+// DeviceCounts is what DeviceBreakdown returns: the rig's frames still on the
+// device, one count per reason they stay (design frame-lifecycle §14.5).
+type DeviceCounts struct {
+	InGrace, Due, Culled, Stuck int
+}
+
+// DeviceBreakdown counts the rig's frames still on the device (residentStates) by
+// why each one stays, in one scan over idx_frames_rig_state (design
+// frame-lifecycle §14.5):
+//
+//   - InGrace and Due split the verified, not-culled frames at graceCutoff, which
+//     is the delete pass's own: pulled_at <= graceCutoff is due, exactly as
+//     DeletionEligible admits it.
+//   - Culled is verified or unclassified with a missing mark, leaving through the
+//     cull drain whatever its grace.
+//   - Stuck is neverDeletableWhere itself, so it always equals the backlog alert's
+//     condition and ListNeverDeletable's total.
+//
+// InGrace, Due and Culled count distinct dest_path, so an H12 USB/eMMC pair is
+// one frame. Stuck counts rows, as ListNeverDeletable does, because a failed row
+// records no dest_path and would otherwise vanish from the line.
+func (s *sqlStore) DeviceBreakdown(ctx context.Context, rigID string, graceCutoff int64) (DeviceCounts, error) {
+	placeholders, stateArgs := stateInClause(rigID, residentStates)
+	const filed = `dest_path IS NOT NULL AND dest_path != ''`
+	const kept = `state = 'verified' AND missing_seen_at IS NULL AND ` + filed
+	args := append([]any{graceCutoff, graceCutoff}, stateArgs...)
+	var c DeviceCounts
 	err := s.read.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT dest_path) FROM frames
-		 WHERE rig_id=? AND dest_path IS NOT NULL AND dest_path != '' AND state IN (`+placeholders+`)`,
-		args...).Scan(&n)
+		`SELECT
+			COUNT(DISTINCT CASE WHEN `+kept+` AND pulled_at > ? THEN dest_path END),
+			COUNT(DISTINCT CASE WHEN `+kept+` AND COALESCE(pulled_at, 0) <= ? THEN dest_path END),
+			COUNT(DISTINCT CASE WHEN state IN ('verified','unclassified') AND missing_seen_at IS NOT NULL
+				AND `+filed+` THEN dest_path END),
+			COALESCE(SUM(CASE WHEN `+neverDeletableWhere+` THEN 1 ELSE 0 END), 0)
+		 FROM frames
+		 WHERE rig_id=? AND state IN (`+placeholders+`)`,
+		args...).Scan(&c.InGrace, &c.Due, &c.Culled, &c.Stuck)
 	if err != nil {
-		return 0, fmt.Errorf("resident count: %w", err)
+		return DeviceCounts{}, fmt.Errorf("device breakdown: %w", err)
 	}
-	return n, nil
+	return c, nil
 }
 
 // ResidentLeads returns, distinct and sorted, the lead of the source path of
@@ -1750,7 +1779,7 @@ func (s *sqlStore) CountUndeletedFramesByDestAnyRig(ctx context.Context, destPat
 // MoveDestPath repoints every row of the rig sharing oldDest at newDest, in one
 // transaction and writing no other column. A frame present on both the USB and
 // eMMC shares is two rows and one file, and four consumers key on that identity
-// (CountLiveFramesByDest, CountFramesTonight, bytes-tonight, ResidentCount), so
+// (CountLiveFramesByDest, CountFramesTonight, bytes-tonight, DeviceBreakdown), so
 // the rows must move together or those counts double. It returns the number of
 // rows updated.
 func (s *sqlStore) MoveDestPath(ctx context.Context, rigID, oldDest, newDest string, policy MoveDestPolicy) (int, error) {

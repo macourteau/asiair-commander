@@ -1298,10 +1298,10 @@ func TestKeepOriginalsSkipsDeleteThenDrains(t *testing.T) {
 	}
 }
 
-// A keep-originals rig never frees device space, so its drain status must read as
-// originals kept — never the deleting-rig "drained" — and the status must flag the
+// A keep-originals rig never frees device space, so its device line must count
+// originals kept — never the deleting rig's drained — and the status must flag the
 // keep-originals mode so the dashboard drops the "space freed"/"in grace" framing.
-// Flipping the toggle off drains the backlog and the status reverts to "drained".
+// Flipping the toggle off drains the backlog and the status reverts to drained.
 func TestKeepOriginalsDrainReadsKeptNotDrained(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	h.profile.KeepOriginals = true
@@ -1314,17 +1314,17 @@ func TestKeepOriginalsDrainReadsKeptNotDrained(t *testing.T) {
 	if !st.KeepOriginals {
 		t.Fatalf("status.KeepOriginals=false, want true for a keep-originals rig")
 	}
-	if st.Drain != "1 kept" {
-		t.Fatalf("drain=%q, want %q (a keep-originals rig never drains/frees space)", st.Drain, "1 kept")
+	if got, want := st.DeviceFrames, (&model.DeviceFrames{Kept: 1}); got == nil || *got != *want {
+		t.Fatalf("device frames=%+v, want %+v (a keep-originals rig never drains/frees space)", got, want)
 	}
 
 	// Turning keep-originals off deletes the now-eligible original and the device
 	// truly drains: the status drops the flag and reverts to the deleting wording.
 	// The delete pass runs after this cycle's status is published, so a second pass
-	// is needed for the resident count to reflect the removal.
+	// is needed for the device breakdown to reflect the removal.
 	h.profile.KeepOriginals = false
 	h.cycle() // deletes the original (status still published pre-delete)
-	h.cycle() // resident count now reflects the removal
+	h.cycle() // the device breakdown now reflects the removal
 
 	if h.deviceHas(f.SourcePath) {
 		t.Fatalf("un-gated delete pass should remove the now-eligible original")
@@ -1333,8 +1333,8 @@ func TestKeepOriginalsDrainReadsKeptNotDrained(t *testing.T) {
 	if st.KeepOriginals {
 		t.Fatalf("status.KeepOriginals=true after the toggle was turned off")
 	}
-	if st.Drain != "drained" {
-		t.Fatalf("drain=%q, want %q after the device drained", st.Drain, "drained")
+	if got, want := st.DeviceFrames, (&model.DeviceFrames{Drained: true}); got == nil || *got != *want {
+		t.Fatalf("device frames=%+v, want %+v after the device drained", got, want)
 	}
 }
 
@@ -1373,7 +1373,7 @@ func TestRefreshLiveCountersPublishesRealCount(t *testing.T) {
 	}
 }
 
-// A keep-originals rig's "N kept" device-drain line climbs live during a pull,
+// A keep-originals rig's kept count on the device line climbs live during a pull,
 // mirroring transferred-tonight, instead of updating only at the cycle boundary.
 func TestRefreshLiveCountersUpdatesKeptDrain(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -1388,8 +1388,8 @@ func TestRefreshLiveCountersUpdatesKeptDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.w.refreshLiveCounters(context.Background(), p, 0)
-	if got := h.status().Drain; got != "1 kept" {
-		t.Fatalf("live refresh Drain = %q, want %q", got, "1 kept")
+	if got, want := h.status().DeviceFrames, (&model.DeviceFrames{Kept: 1}); got == nil || *got != *want {
+		t.Fatalf("live refresh device frames = %+v, want %+v", got, want)
 	}
 }
 

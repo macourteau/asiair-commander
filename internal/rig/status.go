@@ -8,6 +8,7 @@ import (
 
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/route"
+	"github.com/macourteau/asiair-commander/internal/store"
 )
 
 // recentFramesForPrediction bounds how many of a rig's most-recently-filed frames
@@ -94,11 +95,7 @@ func (w *Worker) publishListingStatus(ctx context.Context, cfg *model.Config, pr
 	w.st.EmptySlots = empty
 
 	w.devicePending = pendingWork
-	if resident, err := w.store.ResidentCount(ctx, w.profileID); err == nil {
-		w.st.Drain = drainLabel(resident, w.devicePending, profile.KeepOriginals)
-	} else {
-		w.log.Warn("rig: resident-count query failed", "error", err)
-	}
+	w.refreshDeviceFrames(ctx, cfg, profile)
 
 	since := localNoon(w.now(), w.siteLoc).Unix()
 	if n, err := w.store.CountFramesTonight(ctx, w.profileID, since); err == nil {
@@ -358,10 +355,11 @@ func (w *Worker) maybeAckBacklog(ctx context.Context) {
 	}
 }
 
-// recomputeCounters recomputes w.st.Drain + w.st.FramesTonight and publishes, so a
-// dismiss drops the "N kept" / "transferred tonight" numbers immediately rather
-// than at the next cycle. It runs the same queries refreshLiveCounters uses, minus
-// its throttle and the prediction refresh (unaffected by a dismiss).
+// recomputeCounters recomputes w.st.DeviceFrames + w.st.FramesTonight and
+// publishes, so a dismiss drops the device-line and "transferred tonight" numbers
+// immediately rather than at the next cycle. It runs the same queries
+// refreshLiveCounters uses, minus its throttle and the prediction refresh
+// (unaffected by a dismiss).
 func (w *Worker) recomputeCounters(ctx context.Context) {
 	profile := w.cfg.Load().Rig(w.profileID)
 	if profile == nil {
@@ -372,36 +370,51 @@ func (w *Worker) recomputeCounters(ctx context.Context) {
 	if n, err := w.store.CountFramesTonight(ctx, w.profileID, since); err == nil {
 		w.st.FramesTonight = n
 	}
-	if resident, err := w.store.ResidentCount(ctx, w.profileID); err == nil {
-		w.st.Drain = drainLabel(resident, w.devicePending, profile.KeepOriginals)
+	// Counts published before any listing would describe a device never checked
+	// since startup; leave the card's "Device not checked yet" to the first listing.
+	if w.st.DeviceFrames != nil {
+		w.refreshDeviceFrames(ctx, w.cfg.Load(), profile)
 	}
 	w.publish()
 }
 
-// drainLabel renders the device-drain status line from the resident-frame count.
-// A keep-originals rig never runs the delete pass, so it never frees device space
-// and is never "drained": its originals stay resident by design and read as
-// "kept". Otherwise the count is the grace-period delete backlog ("drained" at
-// zero). An empty backlog is not a drained device while frames not yet copied
-// (pending) still sit on it — nothing has reached the backlog yet — so that case
-// renders no line at all rather than a false "drained". Shared by the cycle-end
-// status and the live mid-cycle refresh so both render identically.
-func drainLabel(resident, pending int, keepOriginals bool) string {
-	switch {
-	case keepOriginals:
-		return fmt.Sprintf("%d kept", resident)
-	case resident == 0 && pending > 0:
-		return ""
-	case resident == 0:
-		return "drained"
-	default:
-		return fmt.Sprintf("%d resident", resident)
+// refreshDeviceFrames re-queries the device breakdown against the delete pass's
+// own grace cutoff and sets w.st.DeviceFrames. A failed query keeps the last
+// counts rather than publishing zeros a reader would take for "drained".
+func (w *Worker) refreshDeviceFrames(ctx context.Context, cfg *model.Config, profile *model.RigProfile) {
+	cutoff := w.now().Add(-cfg.EffectiveGrace(profile)).Unix()
+	counts, err := w.store.DeviceBreakdown(ctx, w.profileID, cutoff)
+	if err != nil {
+		w.log.Warn("rig: device-breakdown query failed", "error", err)
+		return
+	}
+	w.st.DeviceFrames = deviceFrames(counts, w.devicePending, profile.KeepOriginals)
+}
+
+// deviceFrames turns the store's breakdown into the card's device line (design
+// frame-lifecycle §14.5). A keep-originals rig never runs the delete pass, so what
+// a deleting rig would remove (in grace, due, culled) is kept by design and the
+// device is never drained. Otherwise the device is drained only when nothing is
+// left on it and nothing awaits copying: an empty breakdown while uncopied frames
+// (pending) sit on the device is not a drained device, since none has reached the
+// breakdown yet. Shared by the end-of-listing status, the live mid-cycle refresh
+// and the post-dismiss recompute so all three render identically.
+func deviceFrames(c store.DeviceCounts, pending int, keepOriginals bool) *model.DeviceFrames {
+	if keepOriginals {
+		return &model.DeviceFrames{Kept: c.InGrace + c.Due + c.Culled, Stuck: c.Stuck}
+	}
+	return &model.DeviceFrames{
+		InGrace: c.InGrace,
+		Due:     c.Due,
+		Culled:  c.Culled,
+		Stuck:   c.Stuck,
+		Drained: c == store.DeviceCounts{} && pending == 0,
 	}
 }
 
-// refreshLiveCounters re-queries the transferred-tonight and resident-frame counts
-// mid-cycle and publishes them, throttled, so the dashboard's "transferred
-// tonight" stat and the device-drain line ("N kept" / "N resident") climb
+// refreshLiveCounters re-queries the transferred-tonight count and the device
+// breakdown mid-cycle and publishes them, throttled, so the dashboard's
+// "transferred tonight" stat and the device line climb
 // alongside the live transfer progress instead of jumping only at the cycle
 // boundary. It runs the SAME queries publishListingStatus uses, so the live values
 // always match what a page refresh would compute — no drift. Called from the worker
@@ -418,11 +431,7 @@ func (w *Worker) refreshLiveCounters(ctx context.Context, profile *model.RigProf
 	} else {
 		w.log.Warn("rig: frames-tonight refresh query failed", "error", err)
 	}
-	if resident, err := w.store.ResidentCount(ctx, w.profileID); err == nil {
-		w.st.Drain = drainLabel(resident, w.devicePending, profile.KeepOriginals)
-	} else {
-		w.log.Warn("rig: resident-count refresh query failed", "error", err)
-	}
+	w.refreshDeviceFrames(ctx, w.cfg.Load(), profile)
 	w.st.Prediction = w.framePrediction(ctx, since, offset)
 	w.publish()
 }

@@ -1641,7 +1641,7 @@ unconfirmed root never actually drains yet is excluded too, matching how verifie
 9. **AC8.** The drain needs no schema migration and no `CurrentStoreSchemaVersion` of its own.
 10. **AC9.** Manual, on real hardware: an operator with stranded culled frames sees them per-frame
     acknowledgeable, and after Acknowledge or after the settle window the device originals leave
-    the card and the resident count drops.
+    the card and its device line counts them no more.
 
 ## 12. Reorganising folders by hand is unsafe
 

@@ -373,7 +373,7 @@ type Worker struct {
 	// costs one probe per cycle instead of a whole frame streamed and discarded.
 	destWriteErr error
 	// devicePending is the latest count of frames still on the device awaiting
-	// work (uncopied, settling, held or failed). It keeps the drain line from
+	// work (uncopied, settling, held or failed). It keeps the device line from
 	// reading "drained" while frames not yet copied sit on the device.
 	devicePending int
 	// cycleOffset is the device-minus-host clock offset measured at this cycle's
@@ -531,7 +531,6 @@ func NewWorker(
 		ID:             profileID,
 		State:          model.RigStateIdle,
 		SafeToPowerOff: model.SafeUnknown,
-		Drain:          "unknown",
 		// Non-nil so a rig that has not completed a listing serializes shares as []
 		// rather than null; the dashboard maps over it directly.
 		Shares: []model.ShareFree{},
