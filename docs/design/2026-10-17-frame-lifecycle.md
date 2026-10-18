@@ -159,7 +159,7 @@ re-pull it every cycle, reset grace and stall the drain.
 | none | any | Pull. A fresh frame, or the whole state database was lost (§8.4). |
 | marked missing (culled), not `failed` | same size | Skip, before the mtime compare ([library-reconciliation §4.4](2026-10-17-library-reconciliation.md)). |
 | `verified`, `unclassified`, `held`, `dismissed` | matches | Skip: a settled state. |
-| `failed` | matches | Retry once its backoff has elapsed (§4.3). |
+| `failed` | matches | Retry once its backoff has elapsed while attempts remain; with none left, only after a Run now (§4.3). |
 | `deleted` | matches | Pull: the source reappeared; the idempotent keep re-adopts a still-present NAS copy. |
 | any | differs | The differ branch (§4.2). |
 
@@ -213,8 +213,28 @@ A `failed` row does not skip forever. A classify blip or a header quirk later fi
 or a coercion must not strand a frame, so a failed frame is retried once its backoff has elapsed:
 2 min doubling per attempt, capped at 1 h, up to 6 attempts (`failed_retry`). Each failure raises
 a warn `transfer_failed`; the attempt that exhausts the budget raises a critical "permanently
-failed" alert, and the frame then stays `failed` until an explicit Run now or reclassify
+failed" alert and records no next retry, and scheduled cycles then leave the frame `failed`
 (`TestDecideFailedRetryBackoff`).
+
+The operator's way out is **Run now** on the rig. Each press gives every exhausted `failed` frame
+on that rig exactly one more attempt: as the worker applies the press, the frame's
+attempt count drops to one below the budget and its next retry becomes due. If that attempt
+succeeds the frame proceeds like any other (filed, verified, later deleted) and leaves the
+never-deletable backlog; if it fails, the budget is exhausted again, so a frame that keeps failing
+costs one attempt per press and never loops. A frame that still has attempts left keeps its
+backoff: Run now does not shorten a schedule that is still running on its own. The grant is
+stored in the row rather than held for one cycle, because the settle gate (§4.4) observes only
+pull candidates, so an exhausted frame is first sighted on the Run now cycle and copied on the
+next one. The History never-deletable view's "Why it stays" dialog says this and offers Run now
+for a failed frame with no retry ahead (`TestRunNowRetriesExhaustedFailedFrame`,
+`TestRunNowGrantSurvivesTheSettleGate`, `TestRunNowLeavesFailedFrameWithAttemptsLeftAlone`).
+
+| Alternative | Why rejected |
+| --- | --- |
+| Reset the attempt count to zero on Run now | A frame that keeps failing would get the whole schedule again, six automatic attempts and six warn alerts over about an hour, from one press. |
+| Grant the extra attempt for the Run now cycle only | The settle gate defers the copy to the next cycle (and admission or a staging fault can defer it further), so the grant would expire unused; it would also be lost on a restart. |
+| Retry exhausted frames from Reclassify | Reclassify re-files frames that are already on the NAS; a failed frame has no archive copy to re-file. |
+| A per-frame Retry action | Needs a frame-addressed command and its own result path; Run now already reaches every exhausted frame on the rig. |
 
 ### 4.4 Quiescence
 
@@ -1850,7 +1870,7 @@ a reused path overwrites its own row through the `(rig_id, source_share, source_
 | Hard-delete the row instead of a tombstone | The row's size and mtime are what let decide recognise the file as unchanged; without it the corrupt source is re-pulled and re-held on the next cycle and the alert never clears. |
 | A permanent tombstone that ignores later changes | A reused filename, common with FAT short names, would be shadowed and never pulled. Tying stickiness to size and mtime reuses the change detection Commander trusts everywhere else. |
 | Dismiss off the worker goroutine | Leaves a race: a concurrent differ re-pull could raise a spurious `frame_lost` after the purge, or the purge could delete a copy the worker just re-filed at the same path. |
-| Allow dismissing `held` and `failed` | `held` is a delete-time integrity signal that a copy may be corrupt, which a one-click trash button would paper over; `failed` frames retry themselves (§4.3). Dismiss has no handling for `held` or `failed` frames; surfacing them is a separate, known gap. |
+| Allow dismissing `held` and `failed` | `held` is a delete-time integrity signal that a copy may be corrupt, which a one-click trash button would paper over; `failed` frames retry themselves, and Run now retries one that used up its attempts (§4.3). Dismiss has no handling for `held` or `failed` frames; surfacing them is a separate, known gap. |
 | Best-effort purge, tombstoning anyway on failure | Leaves orphaned corrupt files the operator cannot see or clean; the purge must succeed, or the file must already be gone, before the state flips. |
 | Reuse the fire-and-forget command channel | It cannot carry a frame id or return a per-frame result to the UI. |
 

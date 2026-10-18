@@ -86,9 +86,9 @@ func sameListedContent(row *model.Frame, size int64, mtime time.Time) bool {
 }
 
 // failedDue reports whether a failed frame's backoff has elapsed and it has not
-// exhausted its attempt budget (design frame-lifecycle §4). A frame at
-// max_attempts stays failed — retried only by an explicit run-now/reclassify —
-// rather than being hammered every cycle.
+// exhausted its attempt budget (design frame-lifecycle §4.3). A frame at
+// max_attempts stays failed rather than being hammered every cycle; only an
+// operator's Run now brings it back under the budget (grantFailedRetry).
 func (w *Worker) failedDue(cfg *model.Config, row *model.Frame) bool {
 	fr := cfg.Defaults.FailedRetry
 	if fr.MaxAttempts > 0 && row.Attempts >= fr.MaxAttempts {
@@ -96,6 +96,28 @@ func (w *Worker) failedDue(cfg *model.Config, row *model.Frame) bool {
 	}
 	nowUnix := w.now().Unix()
 	return row.NextRetryAt == 0 || row.NextRetryAt <= nowUnix
+}
+
+// grantFailedRetry gives each failed frame on this rig that has used up its
+// attempt budget one more attempt, due at once, when the operator presses Run now
+// (design frame-lifecycle §4.3). The grant is persisted rather than held for one
+// cycle, so it survives the settle gate and admission deferring the attempt to a
+// later cycle; one failure exhausts the budget again, so a frame that keeps
+// failing costs one attempt per press and never loops. A store error only logs:
+// the press still runs its cycle.
+func (w *Worker) grantFailedRetry(ctx context.Context) {
+	maxAttempts := w.cfg.Load().Defaults.FailedRetry.MaxAttempts
+	if maxAttempts <= 0 {
+		return // an unlimited budget never exhausts
+	}
+	n, err := w.store.GrantFailedRetry(ctx, w.profileID, maxAttempts)
+	if err != nil {
+		w.log.Warn("rig: run-now could not grant exhausted failed frames a retry", "error", err)
+		return
+	}
+	if n > 0 {
+		w.log.Info("rig: run-now grants exhausted failed frames one more attempt", "frames", n)
+	}
 }
 
 // resolveDiffer proves the fate of the old DB row whose source path is being

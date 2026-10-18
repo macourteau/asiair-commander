@@ -1141,6 +1141,7 @@ func (w *Worker) apply(ctx context.Context, c Command) (next time.Duration, sche
 		// it would tell an operator to resume a rig they just resumed.
 		return w.runCycle(ctx), schedRan
 	case RunNow:
+		w.grantFailedRetry(ctx)
 		switch {
 		case !w.paused:
 			w.log.Info("rig: run-now")
@@ -1406,6 +1407,7 @@ func (w *Worker) drainCommands(ctx context.Context) {
 				stopped = false
 				w.setPaused(false)
 			case RunNow:
+				w.grantFailedRetry(ctx)
 				switch {
 				case !w.paused || w.runUntilIdle:
 					// A cycle is already in progress, or so is the run.

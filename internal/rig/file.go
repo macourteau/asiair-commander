@@ -518,16 +518,23 @@ func (w *Worker) maybeEnqueueSolve(f *model.Frame) {
 }
 
 // markFailed records a transfer/parse failure as a failed row with exponential
-// backoff and raises the transfer-failed alert (design frame-lifecycle §4). A
+// backoff and raises the transfer-failed alert (design frame-lifecycle §4.3). A
 // frame that exhausts its attempt budget stays failed (a permanent-failure
-// alert) rather than being hammered.
+// alert) until Run now grants it another attempt, rather than being hammered.
 func (w *Worker) markFailed(ctx context.Context, cfg *model.Config, lf listedFrame, prior *model.Frame, reason model.FailReason, msg string) {
 	attempts := 1
 	if prior != nil {
 		attempts = prior.Attempts + 1
 	}
 	fr := cfg.Defaults.FailedRetry
-	nextRetry := w.now().Add(computeBackoff(fr, attempts)).Unix()
+	exhausted := fr.MaxAttempts > 0 && attempts >= fr.MaxAttempts
+	// An exhausted frame has no scheduled retry, only the operator's Run now
+	// (design frame-lifecycle §4.3), so it records none rather than a time the UI
+	// would show as "the next try".
+	var nextRetry int64
+	if !exhausted {
+		nextRetry = w.now().Add(computeBackoff(fr, attempts)).Unix()
+	}
 
 	f := &model.Frame{
 		RigID:       w.profileID,
@@ -565,7 +572,7 @@ func (w *Worker) markFailed(ctx context.Context, cfg *model.Config, lf listedFra
 		w.terminalThisCycle[settleKey(lf)] = true
 		w.hub.Emit(hub.Event{Name: "frame.failed", Data: *f})
 	}
-	if fr.MaxAttempts > 0 && attempts >= fr.MaxAttempts {
+	if exhausted {
 		w.notify.Raise(ctx, model.Alert{
 			RigID:    w.profileID,
 			Severity: model.SeverityCritical,
