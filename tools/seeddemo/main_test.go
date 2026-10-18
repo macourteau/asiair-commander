@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -61,5 +64,55 @@ func TestHeldFrameStaysUnarchived(t *testing.T) {
 	}
 	if len(eligible) != 0 {
 		t.Fatalf("delete pass would select %d held frame(s)", len(eligible))
+	}
+}
+
+// TestLiveSeedArchiveCopiesExist pins that every row the live seed writes has its
+// NAS copy on disk with the recorded size and hash. The library scan marks a row
+// whose dest_path is absent as missing, so a row without its file raises "Library
+// reconciled" on the first linked scan and flips the rig's verdict.
+func TestLiveSeedArchiveCopiesExist(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+
+	if err := seedLive(ctx, st, dir); err != nil {
+		t.Fatalf("seed live: %v", err)
+	}
+	seen := 0
+	for _, rigID := range liveRigs {
+		rows, _, err := st.ListFrames(ctx, rigID, "", "", 0, 100)
+		if err != nil {
+			t.Fatalf("list frames %s: %v", rigID, err)
+		}
+		for _, row := range rows {
+			seen++
+			data, err := os.ReadFile(row.DestPath)
+			if err != nil {
+				t.Fatalf("%s frame %s: archive copy unreadable: %v", rigID, row.SourcePath, err)
+			}
+			if int64(len(data)) != row.ArchiveSize {
+				t.Fatalf("%s: archive copy is %d bytes, row records %d", row.DestPath, len(data), row.ArchiveSize)
+			}
+			sum := fmt.Sprintf("%x", sha256.Sum256(data))
+			if sum != row.ArchiveSHA256 || sum != row.SHA256 {
+				t.Fatalf("%s: archive hash %s, row records archive %s and device %s", row.DestPath, sum, row.ArchiveSHA256, row.SHA256)
+			}
+			// The demo build stages the device file from the same contract, so the
+			// device, archive and recorded copies agree.
+			if dev := fmt.Sprintf("%x", sha256.Sum256(demofiles.HeldFrame.Content())); dev != sum {
+				t.Fatalf("staged device file hashes to %s, archive to %s", dev, sum)
+			}
+			if row.State != model.StateHeld {
+				t.Fatalf("%s: state %q, want held", row.DestPath, row.State)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("live seed wrote no rows")
 	}
 }

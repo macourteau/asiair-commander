@@ -188,7 +188,7 @@ func stageDeviceFiles(f *device.Fake, guid string) {
 		if sf.Rig != "" && sf.Rig != guid {
 			continue
 		}
-		f.AddFile(demofiles.Share, sf.Path, make([]byte, sf.Size), sf.Mtime)
+		f.AddFile(demofiles.Share, sf.Path, sf.Content(), sf.Mtime)
 	}
 }
 

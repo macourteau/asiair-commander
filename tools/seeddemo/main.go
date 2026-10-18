@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -78,9 +79,7 @@ func main() {
 	// "frame lost" on the first delete pass. The one exception is the held frame
 	// the demo build stages under the watched Autorun for the device file browser.
 	if live {
-		for _, rigID := range []string{"rig-fra", "rig-newt"} {
-			must(st.UpsertFrame(ctx, heldFrame(dir, rigID)))
-		}
+		must(seedLive(ctx, st, dir))
 		fmt.Printf("live demo config written to %s (one held frame per rig)\n", dir)
 		return
 	}
@@ -164,6 +163,34 @@ func main() {
 	fmt.Printf("seeded %d frames into %s\n", len(specs)+1, dir)
 }
 
+// liveRigs are the rigs the live seed writes a held row for.
+var liveRigs = []string{"rig-fra", "rig-newt"}
+
+// seedLive writes the live demo's only seeded rows, one held frame per rig, and
+// the NAS copy they share. The library scan marks a row whose file is absent as
+// missing, so a row without its copy would raise "Library reconciled" on the
+// first scan of a linked root and flip the rig's verdict.
+func seedLive(ctx context.Context, st store.Store, dir string) error {
+	dest := heldDestPath(dir)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(dest, demofiles.HeldFrame.Content(), 0o644); err != nil {
+		return err
+	}
+	for _, rigID := range liveRigs {
+		if err := st.UpsertFrame(ctx, heldFrame(dir, rigID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// heldDestPath is where the held frame's NAS copy lives under dir's light root.
+func heldDestPath(dir string) string {
+	return filepath.Join(dir, "light", "M42", demofiles.FullName)
+}
+
 // heldFrame is rigID's row for demofiles.HeldFrame, in the held state. decide()
 // skips a held row whose size and mtime match the listing and the delete pass
 // never selects one, so the device file stays and the device file browser's
@@ -171,7 +198,10 @@ func main() {
 // demo has been draining frames.
 func heldFrame(dir, rigID string) *model.Frame {
 	hf := demofiles.HeldFrame
-	sum := fmt.Sprintf("%064x", 424242)
+	// The real hash of the staged bytes: the device file and the NAS copy seedLive
+	// writes are both hf.Content(), so the three-way check would agree. The row is
+	// held regardless, which keeps it out of every delete pass.
+	sum := fmt.Sprintf("%x", sha256.Sum256(hf.Content()))
 	return &model.Frame{
 		RigID:         rigID,
 		SourceShare:   demofiles.Share,
@@ -187,7 +217,7 @@ func heldFrame(dir, rigID string) *model.Frame {
 		Exptime:       300,
 		Gain:          100,
 		DateObs:       hf.Mtime.UTC().Format(time.RFC3339),
-		DestPath:      filepath.Join(dir, "light", "M42", demofiles.FullName),
+		DestPath:      heldDestPath(dir),
 		State:         model.StateHeld,
 		PulledAt:      hf.Mtime.Unix(),
 		Error:         "delete-pass three-way check failed (device/NAS/recorded mismatch)",
