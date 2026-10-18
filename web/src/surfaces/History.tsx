@@ -45,6 +45,7 @@ import { FrameLightbox } from "./FrameLightbox";
 import { CoordsCell, RotationCell } from "./AstrometryCells";
 import { absoluteTime, basename, formatBytes, relativeTime } from "../util/format";
 import { NEVER_DELETABLE_VIEW } from "../util/alerts";
+import { whyItStaysLabel } from "../util/stuckFrame";
 import "./surfaces.css";
 
 const PAGE_SIZE = 50;
@@ -207,7 +208,7 @@ export function History() {
                 size="sm"
                 variant="secondary"
                 onClick={() => setStuck(f)}
-                aria-label={`Why ${basename(f.source_path)} stays on ${rigName(f.rig_id)}`}
+                aria-label={whyItStaysLabel(basename(f.source_path), rigName(f.rig_id))}
               >
                 Why it stays
               </Button>

@@ -280,7 +280,7 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 		// action the linked History view does not offer (design architecture §10).
 		msg := fmt.Sprintf("Some frames on %q can't be removed from the device automatically, so they stay on it, "+
 			"using its space: unclassified frames until you reclassify or dismiss them, failed frames until a retry "+
-			"succeeds, and held frames until Commander can confirm their NAS copy.", profile.Name)
+			"succeeds, and held frames until you resolve them (each frame says how).", profile.Name)
 		if profile.CapacityConstrained && deviceLow {
 			sev = model.SeverityCritical
 			msg = fmt.Sprintf(backlogCriticalPrefix+"%q: its device is low on free space, and some frames on it can't be "+
