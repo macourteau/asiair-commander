@@ -4,7 +4,8 @@
 # It builds the SPA and a `-tags demo` binary, seeds a live demo data dir, runs the
 # demo with the pinned astap_cli beside it, waits until enough rendered frames have
 # been filed and plate-solved to look like a real night, captures every surface with
-# scripts/screenshots.mjs, and writes the curated set as WebP. Every process it
+# scripts/screenshots.mjs in the light and then the dark theme, and writes the
+# curated set as WebP, each dark image named <name>-dark.webp. Every process it
 # starts is stopped on exit, and its scratch dir is removed (KEEP=1 keeps it).
 #
 # The frames' sky comes from tools/starfield (Gaia DR3, cached under the user cache
@@ -118,23 +119,29 @@ if [ ! -d "$ASTAP_CACHE/d05" ] && [ -d "$DATA/astap/d05" ] && [ ! -L "$DATA/asta
   cp -R "$DATA/astap/d05" "$ASTAP_CACHE/d05.tmp" && mv "$ASTAP_CACHE/d05.tmp" "$ASTAP_CACHE/d05"
 fi
 
-OUT="$RAW" AC_PASSWORD="$PASSWORD" TARGET="http://localhost:$PORT" \
-  NODE_PATH="$(npm root -g)" node scripts/screenshots.mjs
+for scheme in light dark; do
+  OUT="$RAW/$scheme" COLOR_SCHEME="$scheme" AC_PASSWORD="$PASSWORD" TARGET="http://localhost:$PORT" \
+    NODE_PATH="$(npm root -g)" node scripts/screenshots.mjs
+done
 
 # The curated set: <capture> <published name> <width> [<crop x y w h>]. Desktop
 # captures are retina (2880x1800), halved; phone captures are 3x, shrunk to a
 # column; the frame detail is cropped to its dialog (title, preview, identity),
-# above the archive path.
+# above the archive path. Both themes share one layout, so one crop fits both.
 mkdir -p "$DEST"
 rm -f "$DEST"/*.webp
 while read -r src name width crop; do
   [ -n "$src" ] || continue
-  if [ ! -f "$RAW/$src.png" ]; then
-    echo "screenshots: capture $src.png is missing" >&2
-    exit 1
-  fi
-  # shellcheck disable=SC2086 # crop is four separate numbers
-  cwebp -quiet -q 82 -m 6 ${crop:+-crop $crop} -resize "$width" 0 "$RAW/$src.png" -o "$DEST/$name.webp"
+  for scheme in light dark; do
+    out=$name
+    [ "$scheme" = light ] || out="$name-$scheme"
+    if [ ! -f "$RAW/$scheme/$src.png" ]; then
+      echo "screenshots: capture $scheme/$src.png is missing" >&2
+      exit 1
+    fi
+    # shellcheck disable=SC2086 # crop is four separate numbers
+    cwebp -quiet -q 82 -m 6 ${crop:+-crop $crop} -resize "$width" 0 "$RAW/$scheme/$src.png" -o "$DEST/$out.webp"
+  done
 done <<'EOF'
 desktop-dashboard-viewport dashboard 1440
 desktop-feed-viewport feed 1440
