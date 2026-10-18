@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newerRelease, updateAvailable } from "./version";
+import { newerRelease, newerReleaseText, updateAvailable } from "./version";
 
 describe("newerRelease", () => {
   it("returns the reported newer release", () => {
@@ -33,5 +33,13 @@ describe("updateAvailable", () => {
     expect(updateAvailable("v1.0.0", "v1.0.0")).toBeNull();
     expect(updateAvailable("dev", "v1.0.0")).toBeNull();
     expect(updateAvailable("v1.0.0", null)).toBeNull();
+  });
+});
+
+describe("newerReleaseText", () => {
+  it("names the version in both the accessible name and the tooltip", () => {
+    const t = newerReleaseText("v1.4.0");
+    expect(t.name).toBe("Version v1.4.0 available, opens release notes in a new tab");
+    expect(t.tooltip).toBe("v1.4.0 available — view release notes");
   });
 });

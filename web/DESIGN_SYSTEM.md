@@ -142,7 +142,7 @@ actionable error, all wired via `aria-describedby`):
 **Icon set** (`IconName`): status `safe` / `working` / `problem` / `unknown` /
 `info`; domain `rig` / `share` / `nas`; nav `dashboard` / `devices` / `settings`
 / `logs` / `alert`; actions `play` / `pause` / `run-now` / `reclassify` / `scan`
-/ `add` / `trash` / `edit` / `external`; chrome `menu` / `close` /
+/ `add` / `trash` / `edit` / `external` / `update`; chrome `menu` / `close` /
 `chevron-down` / `chevron-right` / `sun` / `moon` / `logout` / `clock`. Icons are
 decorative (`aria-hidden`) unless given a `title`.
 

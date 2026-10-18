@@ -4,12 +4,12 @@
  * color: the active item also carries the accent + a persistent highlight, and
  * is exposed as aria-current so it's not signalled by color alone).
  */
-import { useState } from "react";
+import { useId, useState } from "react";
 import { NavLink } from "react-router";
 import { Badge, Button, Icon, IconButton, useTheme, useToast, type IconName } from "@/design";
 import { api, ApiError, useConnState, useServerInfo, useSnapshot } from "@/api";
 import { themeSwitchView } from "../util/themeSwitch";
-import { newerRelease, RELEASES_URL } from "../util/version";
+import { newerRelease, newerReleaseText, RELEASES_URL } from "../util/version";
 import { unackedAlertsLabel } from "../util/labels";
 import type { PageRoute } from "../util/pageTitle";
 
@@ -64,12 +64,14 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
             <br />
             Commander
           </span>
-          {__APP_VERSION__ && (
-            <span className="shell-brand__version" title="UI build version">
-              {__APP_VERSION__}
-            </span>
-          )}
-          <NewerRelease />
+          <span className="shell-brand__version-row">
+            {__APP_VERSION__ && (
+              <span className="shell-brand__version" title="UI build version">
+                {__APP_VERSION__}
+              </span>
+            )}
+            <NewerRelease />
+          </span>
         </div>
       </div>
 
@@ -133,21 +135,37 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
 // NewerRelease links to the latest release when the server reports one newer
 // than the version it is running (design features §7). The server re-announces
 // server_info when that changes, so it appears and disappears without a reload.
+// It is an icon beside the version so the line keeps its height; its tooltip
+// shows on hover and keyboard focus (a native title never shows on focus), stays
+// while the pointer is over it, and Escape dismisses it.
 function NewerRelease() {
   const latest = newerRelease(useServerInfo());
+  const tipId = useId();
+  const [dismissed, setDismissed] = useState(false);
   if (!latest) return null;
-  const label = `Version ${latest} available`;
+  const text = newerReleaseText(latest);
   return (
     <a
-      className="shell-brand__update"
+      className={`shell-brand__update${dismissed ? " is-dismissed" : ""}`}
       href={RELEASES_URL}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`${label} (opens the release notes in a new tab)`}
-      title={`${label}: view the release notes on GitHub`}
+      aria-label={text.name}
+      aria-describedby={tipId}
+      onKeyDown={(e) => {
+        // The first Escape hides only the tip; the next one reaches the
+        // drawer's document listener and closes the drawer as usual.
+        if (e.key !== "Escape" || dismissed) return;
+        e.stopPropagation();
+        setDismissed(true);
+      }}
+      onBlur={() => setDismissed(false)}
+      onMouseLeave={() => setDismissed(false)}
     >
-      <Icon name="download" size={12} aria-hidden />
-      <span>{latest} available</span>
+      <Icon name="update" size={14} />
+      <span id={tipId} role="tooltip" className="shell-brand__tip">
+        {text.tooltip}
+      </span>
     </a>
   );
 }

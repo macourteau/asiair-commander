@@ -39,3 +39,15 @@ export function newerRelease(
   if (!running || running === "dev" || !latest || latest === running) return null;
   return latest;
 }
+
+/**
+ * newerReleaseText words the nav's newer-release link: `name` is its accessible
+ * name (the version, and that it leaves for a new tab, since the visible control
+ * is an icon alone) and `tooltip` the hint shown on hover and keyboard focus.
+ */
+export function newerReleaseText(latest: string): { name: string; tooltip: string } {
+  return {
+    name: `Version ${latest} available, opens release notes in a new tab`,
+    tooltip: `${latest} available — view release notes`,
+  };
+}
