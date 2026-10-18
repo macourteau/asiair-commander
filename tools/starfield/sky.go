@@ -7,10 +7,9 @@
 // the ESA archive and cached on the local machine. Gaia data are licensed CC BY-NC
 // 3.0 IGO (credit ESA/Gaia/DPAC), so no catalog data and no rendered frame is
 // ever committed or shipped: everything Gaia-derived lives under the user cache
-// directory. The renderer is a small extract of the same author's telescope
-// simulator: a gnomonic projection, a magnitude-to-flux model, a Gaussian PSF
-// with wings, sky background, vignetting, and shot and read noise. It draws stars
-// only.
+// directory. The renderer is deliberately small: a gnomonic projection, a
+// magnitude-to-flux model, a Gaussian core with a Moffat halo, sky background,
+// vignetting, and shot and read noise. It draws stars only.
 //
 // It is not part of the product: only tools/ and the `-tags demo` build import it.
 package starfield
@@ -68,12 +67,15 @@ func (s *Sky) Render(ctx context.Context, t Target) (Frame, error) {
 	}
 	path := filepath.Join(s.Dir, "frames", frameKey(t)+".fit")
 	if b, err := os.ReadFile(path); err == nil {
-		if data, derr := dataUnit(b); derr == nil {
+		data, derr := dataUnit(b)
+		if want := t.Optics.Width() * t.Optics.Height() * 2; derr == nil && len(data) < want {
+			derr = fmt.Errorf("data unit holds %d bytes, want %d", len(data), want)
+		}
+		if derr == nil {
 			log.Info("starfield: render cache hit", "target", t.Name, "file", filepath.Base(path))
 			return Frame{Target: t, File: b, Data: data}, nil
-		} else {
-			log.Warn("starfield: cached render unreadable; re-rendering", "file", filepath.Base(path), "error", derr)
 		}
+		log.Warn("starfield: cached render unreadable; re-rendering", "file", filepath.Base(path), "error", derr)
 	}
 
 	g := s.Gaia
@@ -102,8 +104,7 @@ func (f Frame) FITS(e Exposure) []byte {
 }
 
 // ReferenceExposure heads a cached render and the files the starfield command
-// writes. It is fixed so a cache entry's bytes
-// depend only on the target.
+// writes. It is fixed so a cache entry's bytes depend only on the target.
 var ReferenceExposure = Exposure{
 	Start: time.Date(2026, 10, 7, 23, 15, 2, 0, time.UTC), SetTemp: -10, CCDTemp: -10, Seq: 1,
 }

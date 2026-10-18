@@ -5,8 +5,7 @@ import (
 	"math/rand/v2"
 )
 
-// The photometric model, extracted from the same author's telescope simulator
-// and cut down to what a static demo frame needs.
+// The photometric model, cut down to what a static demo frame needs.
 const (
 	// f0 is the photon flux of a G = 0 star, photons/s/cm². It sits a decade below
 	// the physical zero point so the one constant absorbs extinction, quantum

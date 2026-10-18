@@ -8,6 +8,12 @@
 // onto the fake devices so they flow pending → transferring → filed → deleted for
 // real. Reads are throttled so the progress bar is visible rather than instant.
 //
+// The frames carry real-looking sky: tools/starfield renders each rig's targets
+// once from cached Gaia DR3 cones, and every generated frame is that render behind
+// its own ASIAIR-style header, so previews, History thumbnails and the plate solve
+// all work. When a render cannot be had (no network on first run, the archive
+// down), that rig falls back loudly to random bytes under a synthetic header.
+//
 // This file is compiled ONLY under `-tags demo`; the production binary never
 // contains it (see demo_off.go for the no-op seam).
 package main
@@ -30,14 +36,29 @@ import (
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/netsite"
 	"github.com/macourteau/asiair-commander/internal/rig"
+	"github.com/macourteau/asiair-commander/tools/starfield"
 )
 
 const (
 	demoShare      = "EMMC Images"
 	demoRoot       = "Autorun"
-	demoFrameBytes = 3 << 20   // 3 MiB streamed through the throttle
-	demoReadChunk  = 128 << 10 // read granularity for the throttle
-	demoReadDelay  = 380 * time.Millisecond
+	demoFrameBytes = 3 << 20 // a fallback frame: 3 MiB of random bytes
+	// The throttle's read granularity: a rendered 18 MB frame streams in about a
+	// dozen paced reads, a few seconds, so the progress bar is visible.
+	demoReadChunk = 1536 << 10
+	demoReadDelay = 380 * time.Millisecond
+	// demoSkyWait bounds how long the generator holds its first frame for the sky
+	// renders; a first run fetches each field's catalog cone, seconds apiece.
+	demoSkyWait = 3 * time.Minute
+	// A rendered frame arrives as a real camera's would: one exposure plus this
+	// much overhead (download, dither) after the last, so DATE-OBS gaps match the
+	// cadence and the rig card's next-frame prediction counts down rather than
+	// reading overdue.
+	demoSkyOverhead = 8 * time.Second
+	// demoSkyBacklog caps the rendered frames a rig's fake holds at once, should
+	// the throttled pipeline fall behind the cadence, so the in-memory device
+	// cannot grow without bound.
+	demoSkyBacklog = 3
 	demoInterval   = 7 * time.Second // one new frame per rig every ~7s
 	// The share's statfs: an ASIAIR's 32 GB eMMC with room to spare, so the
 	// dashboard shows a real figure and the File browser's upload plan warns
@@ -58,8 +79,9 @@ func installDemo(
 	_ localfs.LocalFS,
 	logger *slog.Logger,
 ) (deviceFactory, rig.Resolver, header.Reader) {
-	reg := &demoRegistry{fakes: map[string]*device.Fake{}}
+	reg := &demoRegistry{fakes: map[string]*device.Fake{}, skyReady: make(chan struct{})}
 	logger.Info("DEMO MODE: real ASIAIR devices are stubbed by in-memory fakes")
+	go reg.prepareSky(ctx, logger)
 
 	factory := func(ep netsite.Endpoint, _, _ string, _ time.Duration) device.Device {
 		key, delay := demoDeviceAt(ep)
@@ -76,6 +98,68 @@ type demoRegistry struct {
 	mu    sync.Mutex
 	fakes map[string]*device.Fake
 	seq   atomic.Int64
+
+	// sky holds each target's render, written once by prepareSky before it closes
+	// skyReady and only read after.
+	sky      map[string]starfield.Frame
+	skyReady chan struct{}
+	skySeq   map[string]int       // per-target frame number; guarded by mu
+	skyTurn  map[string]int       // per-rig position in its target rotation; guarded by mu
+	skyPaths map[string][]string  // per-rig rendered frames possibly still on the fake; guarded by mu
+	skyNext  map[string]time.Time // per-rig time the next exposure ends; guarded by mu
+}
+
+// initSky makes the per-rig and per-target bookkeeping, before any is used.
+func (r *demoRegistry) initSky() {
+	r.sky = map[string]starfield.Frame{}
+	r.skySeq, r.skyTurn = map[string]int{}, map[string]int{}
+	r.skyPaths, r.skyNext = map[string][]string{}, map[string]time.Time{}
+}
+
+// prepareSky renders every target the demo rigs shoot, from the starfield cache
+// when present. A target that fails is logged and left out; a rig with no
+// rendered target emits fallback frames.
+func (r *demoRegistry) prepareSky(ctx context.Context, logger *slog.Logger) {
+	defer close(r.skyReady)
+	r.initSky()
+	dir, err := starfield.DefaultCacheDir()
+	if err != nil {
+		logger.Warn("DEMO: no cache dir for the starfield renders; frames carry random bytes", "error", err)
+		return
+	}
+	logger.Info("DEMO: preparing starfield frames (a first run fetches Gaia DR3 cones)", "cache", dir)
+	sky := &starfield.Sky{Dir: dir, Log: logger}
+	for _, t := range starfield.Targets {
+		f, err := sky.Render(ctx, t)
+		if err != nil {
+			logger.Warn("DEMO: starfield render failed; this target's frames carry random bytes", "target", t.Name, "error", err)
+			continue
+		}
+		r.sky[t.Name] = f
+	}
+	logger.Info("DEMO: starfield frames ready", "targets", len(r.sky), "of", len(starfield.Targets))
+}
+
+// skyTargets are the rendered targets rig guid shoots: the FRA300 the wide
+// clusters, the Newtonian's long focal length the globular. A remote scenario's
+// rigs (tools/seedremote) keep the small random-byte frames its timings assume.
+func (r *demoRegistry) skyTargets(guid string) []starfield.Frame {
+	var want starfield.Optics
+	switch guid {
+	case demofiles.RigFRA:
+		want = starfield.FRA300
+	case demofiles.RigNewt:
+		want = starfield.N200
+	default:
+		return nil
+	}
+	var out []starfield.Frame
+	for _, t := range starfield.Targets {
+		if f, ok := r.sky[t.Name]; ok && t.Optics == want {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (r *demoRegistry) fakeFor(addr string) *device.Fake {
@@ -113,6 +197,15 @@ func stageDeviceFiles(f *device.Fake, guid string) {
 func (r *demoRegistry) generate(ctx context.Context, cfg *atomic.Pointer[model.Config], logger *slog.Logger) {
 	targets := []string{"NGC 7000", "M31", "IC 1805", "M42", "Rosette", "M27"}
 	filters := []string{"Ha", "OIII", "SII", "L", "R", "G"}
+	// Hold the first frame until the sky renders are ready, so every frame the feed
+	// shows carries them; prepareSky closes skyReady on failure too.
+	select {
+	case <-r.skyReady:
+	case <-ctx.Done():
+		return
+	case <-time.After(demoSkyWait):
+		logger.Warn("DEMO: starfield frames not ready; generating without them", "waited", demoSkyWait)
+	}
 	t := time.NewTicker(demoInterval)
 	defer t.Stop()
 	// One frame straight away so the feed is populated on first load.
@@ -133,8 +226,81 @@ func (r *demoRegistry) emit(cfg *atomic.Pointer[model.Config], targets, filters 
 		if !rp.Managed || rp.GUID == "" {
 			continue
 		}
-		r.addFrame(rp.GUID, targets, filters)
+		if !r.addSkyFrame(rp.GUID) {
+			r.addFrame(rp.GUID, targets, filters)
+		}
 	}
+}
+
+// addSkyFrame puts the next rendered frame of rig guid's targets on its fake,
+// named and headed as an ASIAIR Autorun light that finished exposing just now,
+// once the rig's previous exposure and its overhead have elapsed and unless the
+// rig already holds demoSkyBacklog of them. It reports false when the rig has no
+// rendered target or the renders are not ready, so the caller falls back to a
+// random-byte frame.
+func (r *demoRegistry) addSkyFrame(guid string) bool {
+	select {
+	case <-r.skyReady:
+	default:
+		return false
+	}
+	frames := r.skyTargets(guid)
+	if len(frames) == 0 {
+		return false
+	}
+	end := time.Now().UTC()
+	r.mu.Lock()
+	due := !end.Before(r.skyNext[guid])
+	r.mu.Unlock()
+	fake := r.fakeFor(guid)
+	if !due || r.skyBacklog(guid, fake) >= demoSkyBacklog {
+		return true
+	}
+	r.mu.Lock()
+	f := frames[r.skyTurn[guid]%len(frames)]
+	exposure := time.Duration(f.Target.Exposure * float64(time.Second))
+	r.skyTurn[guid]++
+	r.skySeq[f.Target.Name]++
+	n := r.skySeq[f.Target.Name]
+	r.skyNext[guid] = end.Add(exposure + demoSkyOverhead)
+	r.mu.Unlock()
+	e := starfield.Exposure{
+		Start:   end.Add(-exposure),
+		SetTemp: -10, CCDTemp: -10, Seq: n,
+	}
+	path := demoRoot + "/Light/" + f.Target.Name + "/" + starfield.FrameName(f.Target, e)
+	// The device stamps the file when the exposure ends. Unlike the fallback's
+	// backdated mtime, a current one keeps the rig card's next-frame prediction
+	// honest; the live demo config's min_file_age is 0.
+	fake.AddFile(demoShare, path, f.FITS(e), end)
+	r.mu.Lock()
+	r.skyPaths[guid] = append(r.skyPaths[guid], path)
+	r.mu.Unlock()
+	return true
+}
+
+// skyBacklog counts the rendered frames still on rig guid's fake, forgetting the
+// ones the delete pass has removed. A fake that cannot be read counts as empty.
+func (r *demoRegistry) skyBacklog(guid string, fake *device.Fake) int {
+	sess, err := fake.Open(context.Background())
+	if err != nil {
+		return 0
+	}
+	defer sess.Close()
+	sh, err := sess.Mount(demoShare)
+	if err != nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.skyPaths[guid][:0]
+	for _, p := range r.skyPaths[guid] {
+		if _, err := sh.Stat(p); err == nil {
+			kept = append(kept, p)
+		}
+	}
+	r.skyPaths[guid] = kept
+	return len(kept)
 }
 
 // preload puts the frames the remote scenario asks for on their devices before
@@ -229,13 +395,17 @@ func demoDeviceAt(ep netsite.Endpoint) (string, time.Duration) {
 	return ep.IP, demoReadDelay
 }
 
-// demoHeader returns a synthetic Light header, taking the target and filter from
-// the file path so generated frames route to distinct folders — the file bytes
-// themselves are random, which is fine because classification reads only this
-// header, and the byte-verify/delete paths are content-agnostic.
+// demoHeader reads a rendered frame's own header. A fallback frame is random bytes
+// with no header, so for it a synthetic Light header is made up, taking the target
+// and filter from the file path so generated frames route to distinct folders;
+// classification reads only this header, and the byte-verify/delete paths are
+// content-agnostic.
 type demoHeader struct{}
 
 func (demoHeader) ReadHeader(path string) (model.Header, error) {
+	if h, err := header.New().ReadHeader(path); err == nil {
+		return h, nil
+	}
 	tgt, flt := "M31", "HA"
 	// .../Light/<target>/Light_<filter>_NNNN.fit
 	parts := strings.Split(path, "/")

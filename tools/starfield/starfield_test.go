@@ -360,3 +360,25 @@ func TestPresetsFrameTheirTargets(t *testing.T) {
 		t.Error("TargetByName found a target that is not a preset")
 	}
 }
+
+func TestSkyReRendersATruncatedCachedFrame(t *testing.T) {
+	srv, calls, _ := tapStub(t, http.StatusOK, stubCSV)
+	dir := t.TempDir()
+	tg := smallTarget()
+	full := File(Cards(tg, ReferenceExposure), DataUnit(Render(tg, nil, 1)))
+	path := filepath.Join(dir, "frames", frameKey(tg)+".fit")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, full[:len(full)-2*2880], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sky := &Sky{Dir: dir, Gaia: &Gaia{Dir: filepath.Join(dir, "gaia"), TAPURL: srv.URL, Log: quietLog()}, Log: quietLog()}
+	f, err := sky.Render(context.Background(), tg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 || len(f.Data) < tg.Optics.Width()*tg.Optics.Height()*2 {
+		t.Errorf("a truncated cached render was served (archive calls %d, data %d bytes)", calls.Load(), len(f.Data))
+	}
+}

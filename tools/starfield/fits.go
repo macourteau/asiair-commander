@@ -70,7 +70,7 @@ func Cards(t Target, e Exposure) []string {
 }
 
 // FrameName is the file name an ASIAIR's Autorun gives this frame, e.g.
-// Light_M45_120.0s_Bin2_533MM_gain100_20261007-231502_-10.0C_0001.fit: the
+// Light_M45_60.0s_Bin1_533MM_gain100_20261007-231502_-10.0C_0001.fit: the
 // start time is local to the device clock, which the demo keeps in UTC.
 func FrameName(t Target, e Exposure) string {
 	o := t.Optics

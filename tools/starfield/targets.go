@@ -84,14 +84,14 @@ var (
 // dipper, the Double Cluster's pair, the Coathanger's bar and hook, the
 // Beehive's loose swarm, and the Hercules globular's resolved ball.
 var Targets = []Target{
-	{Name: "M45", RA: 56.75, Dec: 24.12, RotationDeg: 4, Optics: FRA300, Exposure: 120, Filter: "L", MagLimit: 14.5},
-	{Name: "Double Cluster", RA: 35.15, Dec: 57.13, RotationDeg: 354, Optics: FRA300, Exposure: 120, Filter: "L", MagLimit: 14.5},
+	{Name: "M45", RA: 56.75, Dec: 24.12, RotationDeg: 4, Optics: FRA300, Exposure: 60, Filter: "L", MagLimit: 14.5},
+	{Name: "Double Cluster", RA: 35.15, Dec: 57.13, RotationDeg: 354, Optics: FRA300, Exposure: 60, Filter: "L", MagLimit: 14.5},
 	// Rotated about half a turn so the hook sits above the bar, the way the
 	// asterism gets its name; north-up it hangs upside down. No framing is exactly
 	// square to the sky, so every target carries a few degrees of camera angle.
-	{Name: "Coathanger", RA: 291.55, Dec: 20.12, RotationDeg: 182, Optics: FRA300, Exposure: 120, Filter: "L", MagLimit: 14.5},
-	{Name: "M44", RA: 130.10, Dec: 19.67, RotationDeg: 8, Optics: FRA300, Exposure: 120, Filter: "L", MagLimit: 14.5},
-	{Name: "M13", RA: 250.4235, Dec: 36.4613, RotationDeg: 357, Optics: N200, Exposure: 60, Filter: "L", MagLimit: 18},
+	{Name: "Coathanger", RA: 291.55, Dec: 20.12, RotationDeg: 182, Optics: FRA300, Exposure: 60, Filter: "L", MagLimit: 14.5},
+	{Name: "M44", RA: 130.10, Dec: 19.67, RotationDeg: 8, Optics: FRA300, Exposure: 60, Filter: "L", MagLimit: 14.5},
+	{Name: "M13", RA: 250.4235, Dec: 36.4613, RotationDeg: 357, Optics: N200, Exposure: 30, Filter: "L", MagLimit: 18},
 }
 
 // TargetByName returns the preset with this name.
