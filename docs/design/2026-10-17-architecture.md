@@ -1267,7 +1267,8 @@ and the current snapshot, then two kinds of data on two mechanisms with opposite
 requirements:
 
 - **A coalesced snapshot** — per-rig state, current file and progress, counts, per-share
-  device free space, NAS free space, drain status, the power-off verdict and its reason, the
+  device free space, NAS free space, what is still on the device and why
+  ([frame-lifecycle §14.5](2026-10-17-frame-lifecycle.md)), the power-off verdict and its reason, the
   listing timestamp, **and the unacknowledged-alert count** — delivered latest-wins: the hub
   stores an immutable whole-fleet `Snapshot` in an `atomic.Pointer` and notifies each
   subscriber over a size-1 channel, replacing a stale pending value. A slow browser coalesces

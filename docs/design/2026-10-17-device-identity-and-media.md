@@ -752,8 +752,8 @@ consult `RigProfile.DisabledShares()` and skip a disabled share's rows: its devi
 are not cleaned, its frames are not restored, and its possibly unreachable share is not
 mounted per frame. A share carrying both a disabled and an enabled source of the same name
 counts as enabled. A share removed from config entirely is not "disabled", so its recorded
-frames still drain. Store-level aggregates that are not share-scoped (the resident count
-behind the drain label, the never-deletable backlog count) still count a disabled share's
+frames still drain. Store-level aggregates that are not share-scoped (the device breakdown
+behind the card's device line, the never-deletable backlog count) still count a disabled share's
 leftover rows; that is harmless to the verdict, and is why the claim is "ignored where the
 rig acts", not "erased".
 
