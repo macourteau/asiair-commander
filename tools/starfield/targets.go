@@ -63,9 +63,6 @@ func (t Target) ConeRadius() float64 {
 
 // The ZWO ASI533MM Pro: a 3008x3008 3.76 µm 14-bit sensor, whose unity gain is
 // 100, and the smallest cooled mono format in common use (a frame is about 18 MB).
-// The demo shoots it unbinned: whether an ASIAIR's XPIXSZ includes binning is not
-// settled (design asiair-hardware-notes §8.1 and features §3.1 disagree), and at
-// Bin1 both readings give the same plate scale, so the solve works either way.
 var ASI533MM = Camera{
 	Model: "ZWO ASI533MM Pro", Short: "533MM",
 	Width: 3008, Height: 3008, PixelUm: 3.76,

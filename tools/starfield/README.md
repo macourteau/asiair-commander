@@ -24,9 +24,9 @@ Each is recognisable from its stars alone; the renderer draws no nebulosity.
 | M44 (the Beehive) | FRA300 | 2.16° x 2.16° | 60 s L |
 | M13 | 200 mm f/4 Newtonian + ASI533MM Pro | 0.81° x 0.81° | 30 s L |
 
-Frames are unbinned 3008x3008 (about 18 MB). Whether an ASIAIR's `XPIXSZ` includes binning is
-not settled in the design docs, and at Bin1 both readings give the same plate scale. Every
-field solves with ASTAP's default d05 catalog; to check one by hand:
+Frames are unbinned 3008x3008 (about 18 MB). `XPIXSZ` is the binned pixel pitch, as an ASIAIR
+writes it ([asiair-hardware-notes §8.1](../../docs/design/2026-10-17-asiair-hardware-notes.md)).
+Every field solves with ASTAP's default d05 catalog; to check one by hand:
 
 ```
 ASTAP_BIN=<astap_cli> ASTAP_CATALOG_DIR=<d05 dir> ASTAP_FRAME=<rendered .fit> \
