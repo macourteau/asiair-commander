@@ -535,3 +535,37 @@ func TestLoadIgnoresUndefinedTLSKey(t *testing.T) {
 		t.Errorf("web_port = %d, want 8686", cfg.WebPort)
 	}
 }
+
+// TestUpdateCheckDefaultsOnWithoutTheKey: a config written before the update
+// check existed has no update_check_disabled key and must load with checking
+// on, at the same schema version and with no migration; an explicit opt-out
+// round-trips (design features §7).
+func TestUpdateCheckDefaultsOnWithoutTheKey(t *testing.T) {
+	if Defaults().UpdateCheckDisabled {
+		t.Fatal("Defaults() ships with the update check off")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := fmt.Sprintf("schema_version: %d\nweb_port: 8686\n", model.CurrentSchemaVersion)
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UpdateCheckDisabled {
+		t.Error("a config without update_check_disabled loaded with the check off")
+	}
+
+	cfg.UpdateCheckDisabled = true
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !got.UpdateCheckDisabled {
+		t.Error("update_check_disabled: true did not survive a save and reload")
+	}
+}

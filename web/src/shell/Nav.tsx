@@ -7,7 +7,8 @@
 import { useState } from "react";
 import { NavLink } from "react-router";
 import { Badge, Button, Icon, IconButton, Toggle, useTheme, useToast, type IconName } from "@/design";
-import { api, ApiError, useConnState, useSnapshot } from "@/api";
+import { api, ApiError, useConnState, useServerInfo, useSnapshot } from "@/api";
+import { newerRelease, RELEASES_URL } from "../util/version";
 
 interface NavItem {
   to: string;
@@ -63,6 +64,7 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
               {__APP_VERSION__}
             </span>
           )}
+          <NewerRelease />
         </div>
       </div>
 
@@ -124,6 +126,28 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
         </div>
       </div>
     </nav>
+  );
+}
+
+// NewerRelease links to the latest release when the server reports one newer
+// than the version it is running (design features §7). The server re-announces
+// server_info when that changes, so it appears and disappears without a reload.
+function NewerRelease() {
+  const latest = newerRelease(useServerInfo());
+  if (!latest) return null;
+  const label = `Version ${latest} available`;
+  return (
+    <a
+      className="shell-brand__update"
+      href={RELEASES_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`${label} (opens the release notes in a new tab)`}
+      title={`${label}: view the release notes on GitHub`}
+    >
+      <Icon name="download" size={12} aria-hidden />
+      <span>{latest} available</span>
+    </a>
   );
 }
 

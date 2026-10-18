@@ -34,3 +34,8 @@ func installDemo(
 func installDemoRemotes(_ context.Context, _ string, opts supervisor.Options, _ *slog.Logger) supervisor.Options {
 	return opts
 }
+
+// demoReleasesURL is "" outside a `-tags demo` build, so the update checker
+// always asks the real GitHub API. The demo variant lives in
+// demo_updatecheck.go.
+func demoReleasesURL() string { return "" }

@@ -341,6 +341,12 @@ export interface ServerInfo {
   version: string;
   /** Unix seconds of the server process start; 0 when unknown. */
   started_at: number;
+  /**
+   * The newest published release when it is newer than `version`, or "" when
+   * there is none, none is known yet, or the update check is switched off.
+   * Re-announced whenever it changes.
+   */
+  latest_version: string;
 }
 
 /** One Tier 1 star catalog's install state (model.CatalogState). */
@@ -672,6 +678,11 @@ export interface Config {
    * neither shown nor validated.
    */
   mosaic_detection: boolean;
+  /**
+   * Stops the hourly request to api.github.com that asks whether a newer release
+   * exists. Off (the default) means checking is on. Applies live.
+   */
+  update_check_disabled: boolean;
   roots: Roots;
   exclude_extensions: string[];
   delete_sidecar_extensions: string[];

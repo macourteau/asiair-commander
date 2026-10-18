@@ -61,6 +61,27 @@
   font-size: var(--text-xs);
   line-height: 1;
 }
+.shell-brand__update {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-quiet);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.shell-brand__update:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
 .shell-navlist {
   display: flex;
   flex-direction: column;

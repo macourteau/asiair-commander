@@ -1261,8 +1261,10 @@ figures). `EventSource` cannot set the CSRF header, so the stream is authorized 
 session cookie plus the Host allowlist and, when the handshake carries one, an Origin
 check: a cross-origin `EventSource` from a rebinding page is rejected while the same-origin
 SPA connects. On connect it sends a `server_info` event (build version and process start,
-which never change within a connection) and the current snapshot, then two kinds of data on
-two mechanisms with opposite delivery requirements:
+which never change within a connection, and the newest release when it is newer than the
+running build, which is re-announced whenever it changes; [features §7](2026-10-17-features.md))
+and the current snapshot, then two kinds of data on two mechanisms with opposite delivery
+requirements:
 
 - **A coalesced snapshot** — per-rig state, current file and progress, counts, per-share
   device free space, NAS free space, drain status, the power-off verdict and its reason, the

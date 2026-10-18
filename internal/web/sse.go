@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/macourteau/asiair-commander/internal/hub"
 	"github.com/macourteau/asiair-commander/internal/model"
 )
 
@@ -51,20 +52,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Announce the process constants once, up front. They never change within a
-	// connection, so they ride their own event instead of every snapshot frame; a
-	// server update drops the stream, and the reconnect re-announces the new values.
-	var startedUnix int64
-	if !s.deps.StartedAt.IsZero() {
-		startedUnix = s.deps.StartedAt.Unix()
-	}
-	if err := writeSSE(w, "server_info", serverInfo{Version: s.deps.Version, StartedAt: startedUnix}); err != nil {
+	// Subscribe before announcing, so a server_info re-announced between the two
+	// (AnnounceServerInfo) is queued rather than lost.
+	_, snaps, events, cancel := s.deps.Hub.Subscribe()
+	defer cancel()
+
+	// Announce the server info once, up front. It rides its own event instead of
+	// every snapshot frame: the process constants never change within a
+	// connection (a server update drops the stream, and the reconnect re-announces
+	// them), and the one field that can change is re-announced on its own.
+	if err := writeSSE(w, "server_info", s.serverInfo()); err != nil {
 		return
 	}
 	flusher.Flush()
-
-	_, snaps, events, cancel := s.deps.Hub.Subscribe()
-	defer cancel()
 
 	ticker := time.NewTicker(keepaliveInterval)
 	defer ticker.Stop()
@@ -174,13 +174,37 @@ func (s *Server) handleAppLogStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// serverInfo is the one-shot payload announced when an SSE client connects: the
-// build-time app version and the process-start time (unix seconds, 0 if unset)
-// the SPA shows in its chrome. It is web-layer metadata, deliberately kept out of
-// model.Snapshot so build info never leaks into the domain status model.
+// serverInfo is the payload announced when an SSE client connects: the
+// build-time app version, the process-start time (unix seconds, 0 if unset) and
+// the newest published release when it is newer than the running build ("" for
+// none), which the SPA shows in its chrome. It is web-layer metadata,
+// deliberately kept out of model.Snapshot so build info never leaks into the
+// domain status model.
 type serverInfo struct {
-	Version   string `json:"version"`
-	StartedAt int64  `json:"started_at"`
+	Version       string `json:"version"`
+	StartedAt     int64  `json:"started_at"`
+	LatestVersion string `json:"latest_version"`
+}
+
+func (s *Server) serverInfo() serverInfo {
+	info := serverInfo{Version: s.deps.Version}
+	if !s.deps.StartedAt.IsZero() {
+		info.StartedAt = s.deps.StartedAt.Unix()
+	}
+	if s.deps.LatestVersion != nil {
+		info.LatestVersion = s.deps.LatestVersion()
+	}
+	return info
+}
+
+// AnnounceServerInfo pushes a fresh server_info to every connected client. The
+// update checker calls it when the newest release changes, and a config save
+// calls it when the update check is switched (design features §7).
+func (s *Server) AnnounceServerInfo() {
+	if s.deps.Hub == nil {
+		return
+	}
+	s.deps.Hub.Emit(hub.Event{Name: "server_info", Data: s.serverInfo()})
 }
 
 // frameEventData converts a frame-carrying event payload (frame.done /

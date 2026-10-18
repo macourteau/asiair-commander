@@ -45,6 +45,7 @@ import (
 	"github.com/macourteau/asiair-commander/internal/rig"
 	svc "github.com/macourteau/asiair-commander/internal/service"
 	"github.com/macourteau/asiair-commander/internal/store"
+	"github.com/macourteau/asiair-commander/internal/updatecheck"
 	"github.com/macourteau/asiair-commander/internal/web"
 )
 
@@ -400,7 +401,20 @@ func runStack(ctx context.Context, dataDir string, logger *slog.Logger, appLog *
 		return fmt.Errorf("upload staging: %w", err)
 	}
 
-	srv := web.New(web.Deps{
+	// The update checker reads its switch from the live config pointer, so a
+	// Settings change applies at once. srv is assigned before Run starts, so
+	// OnChange (only ever called from Run) always sees it.
+	var srv *web.Server
+	updates := updatecheck.New(updatecheck.Options{
+		Version:  version,
+		Enabled:  func() bool { return !cfgPtr.Load().UpdateCheckDisabled },
+		OnChange: func() { srv.AnnounceServerInfo() },
+		Logger:   logger,
+		// demoReleasesURL is "" outside a `-tags demo` build (see demo_off.go).
+		BaseURL: demoReleasesURL(),
+	})
+
+	srv = web.New(web.Deps{
 		ConfigPath:          configPath,
 		DataDir:             dataDir,
 		Config:              cfgPtr,
@@ -427,7 +441,9 @@ func runStack(ctx context.Context, dataDir string, logger *slog.Logger, appLog *
 		Now:                 time.Now,
 		Version:             version,
 		StartedAt:           startedAt,
+		LatestVersion:       updates.Latest,
 	})
+	go updates.Run(ctx)
 
 	return serveHTTP(ctx, dataDir, cfg, srv, logger, ready)
 }

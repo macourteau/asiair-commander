@@ -685,6 +685,26 @@ export function Settings() {
           />
         </SectionCard>
 
+        {/* Updates */}
+        <SectionCard
+          title="Updates"
+          sub="Whether Commander tells you when a newer release is published. It never downloads or installs anything."
+        >
+          <Field
+            label="Check for new releases"
+            help="Makes one request an hour to api.github.com and, when a newer release exists, shows a link next to the version in the menu. Applies as soon as you save."
+            example={config.update_check_disabled ? "Off" : "On"}
+          >
+            {() => (
+              <Toggle
+                checked={!config.update_check_disabled}
+                onChange={(v) => patch({ update_check_disabled: !v })}
+                label={config.update_check_disabled ? "Off" : "On"}
+              />
+            )}
+          </Field>
+        </SectionCard>
+
         {/* Diagnostics */}
         <SectionCard
           title="Diagnostics"

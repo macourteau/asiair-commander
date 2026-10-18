@@ -264,6 +264,9 @@ type Deps struct {
 	// StartedAt is the application's process-start time; the SPA ticks the uptime
 	// off the unix seconds announced in server_info. Zero omits the uptime.
 	StartedAt time.Time
+	// LatestVersion reports a published release newer than Version, or "" for
+	// none (design features §7). It rides server_info; nil reports none.
+	LatestVersion func() string
 }
 
 // Server is the configured web layer. Construct with New; serve via Handler

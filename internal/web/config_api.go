@@ -89,14 +89,16 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // configPut is the decode target for a caller-supplied whole config. It is a
-// plain model.Config plus pointer shadows for the two fields whose absence must
-// not read as "set me to the zero value".
+// plain model.Config plus pointer shadows for the fields whose absence must not
+// read as "set me to the zero value".
 //
-// A client older than the server omits both. mosaic_detection would then decode
+// A client older than the server omits them. mosaic_detection would then decode
 // as false and silently reverse the operator's opt-in — a stale tab pressing Save
-// would start filing panels flat again, by a path no UI warning can see — and
-// templates.mosaic would decode as "", which normalization fills with the DEFAULT
-// rather than the customised value that was stored.
+// would start filing panels flat again, by a path no UI warning can see —
+// update_check_disabled would decode as false and silently resume a request the
+// operator switched off, and templates.mosaic would decode as "", which
+// normalization fills with the DEFAULT rather than the customised value that was
+// stored.
 //
 // The shadow has to capture the whole templates object, not a bare *string named
 // mosaic: templates is nested, so a depth-0 field of that name would be a sibling
@@ -105,8 +107,9 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 // back in merge.
 type configPut struct {
 	model.Config
-	MosaicDetection *bool `json:"mosaic_detection"`
-	Templates       *struct {
+	MosaicDetection     *bool `json:"mosaic_detection"`
+	UpdateCheckDisabled *bool `json:"update_check_disabled"`
+	Templates           *struct {
 		Light  *string                    `json:"light"`
 		Cal    map[model.FrameType]string `json:"cal"`
 		Mosaic *string                    `json:"mosaic"`
@@ -121,6 +124,12 @@ func (p *configPut) merge(stored *model.Config) *model.Config {
 	cfg.MosaicDetection = stored.MosaicDetection
 	if p.MosaicDetection != nil {
 		cfg.MosaicDetection = *p.MosaicDetection
+	}
+	// An older client omitting update_check_disabled must not switch a disabled
+	// update check back on.
+	cfg.UpdateCheckDisabled = stored.UpdateCheckDisabled
+	if p.UpdateCheckDisabled != nil {
+		cfg.UpdateCheckDisabled = *p.UpdateCheckDisabled
 	}
 
 	// The cal map is cloned rather than aliased: NormalizeTemplates rewrites it in
@@ -310,6 +319,12 @@ func (s *Server) saveConfigLocked(w http.ResponseWriter, candidate *model.Config
 	s.deps.Supervisor.ApplyConfig(merged)
 	s.deps.Config.Store(merged)
 	s.log.Info("web: config applied", "updated_at", merged.UpdatedAt)
+	if merged.UpdateCheckDisabled != stored.UpdateCheckDisabled {
+		// The reported release depends on the switch, so connected tabs show or
+		// hide the indicator at once rather than at their next reconnect.
+		s.log.Info("web: update check switched", "enabled", !merged.UpdateCheckDisabled)
+		s.AnnounceServerInfo()
+	}
 
 	if passwordChanged {
 		now := s.now()
