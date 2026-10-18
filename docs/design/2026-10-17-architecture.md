@@ -1579,6 +1579,35 @@ the token from the token file. The seeders under `tools/` stage real content for
 device, remotes). `SURFACES` in the script is hand-maintained: a surface missing from it is
 silently never captured, so adding a surface extends it.
 
+### 14.9 Synthetic sky for the demo and the README screenshots
+
+The `-tags demo` build's frames carry rendered sky rather than random bytes, so previews, History
+thumbnails and a real ASTAP plate solve all work in the demo and in the README screenshots.
+`tools/starfield` renders five fields recognisable from their stars alone (the Pleiades, the
+Double Cluster, the Coathanger, the Beehive and M13) from Gaia DR3: one magnitude-limited cone per
+field from the ESA archive's synchronous TAP endpoint, cached under the user cache directory and
+rendered once into the same cache. Each generated frame is that render behind its own ASIAIR-style
+header (unique `DATE-OBS` and sequence, a few arcminutes of goto error in `RA`/`DEC`, no WCS), so
+Commander's own Tier-1 solve is what places it. The renderer draws stars only: a gnomonic
+projection, a magnitude-to-flux model, a Gaussian core with a Moffat halo, sky with gradient and
+vignetting, and shot and read noise. When a
+field cannot be rendered (no network on a first run, the archive down), the demo logs it and that
+rig falls back to random bytes under a synthetic header. `make screenshots`
+(`scripts/readme-screenshots.sh`) runs the demo until enough frames are filed and solved, captures
+it, and writes the curated set to `docs/screenshots/`.
+
+Gaia data are licensed CC BY-NC 3.0 IGO, so no catalog data and no rendered frame is committed
+or shipped. The cache lives outside the checkout, the generator is imported only by `tools/` and
+the demo build (never by the production binary, the image or the installer), and the committed
+screenshots carry the ESA/Gaia/DPAC credit in `docs/screenshots/README.md` and the README.
+
+| Rejected | Why |
+|---|---|
+| Committing rendered frames through Git LFS | Five 18 MB frames per refresh in the history of a public repository, each a Gaia-derived product under a non-commercial licence; the cache regenerates them in seconds. |
+| Committing a catalog slice for the demo fields | The same licence question for raw catalog rows, plus a data file to keep in step with the targets; a few cone queries per machine cost nothing. |
+| Procedural random star fields | They cannot plate-solve, so the demo could never show a solved frame, and they look like no field an astrophotographer knows. |
+| Synthetic nebulosity for M42, M31 or NGC 7000 | Painted gas does not read as the real object at screenshot size; clusters and asterisms are recognisable from stars alone. |
+
 ## 15. Dependencies
 
 Go, all pure Go with no cgo:
