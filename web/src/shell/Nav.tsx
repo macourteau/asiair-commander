@@ -4,7 +4,7 @@
  * color: the active item also carries the accent + a persistent highlight, and
  * is exposed as aria-current so it's not signalled by color alone).
  */
-import { useId, useState } from "react";
+import { useState } from "react";
 import { NavLink } from "react-router";
 import { Badge, Button, Icon, IconButton, useTheme, useToast, type IconName } from "@/design";
 import { api, ApiError, useConnState, useServerInfo, useSnapshot } from "@/api";
@@ -137,10 +137,10 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
 // server_info when that changes, so it appears and disappears without a reload.
 // It is an icon beside the version so the line keeps its height; its tooltip
 // shows on hover and keyboard focus (a native title never shows on focus), stays
-// while the pointer is over it, and Escape dismisses it.
+// while the pointer is over it, and Escape dismisses it. The tip is visual only:
+// the link's accessible name already says everything it does.
 function NewerRelease() {
   const latest = newerRelease(useServerInfo());
-  const tipId = useId();
   const [dismissed, setDismissed] = useState(false);
   if (!latest) return null;
   const text = newerReleaseText(latest);
@@ -151,7 +151,6 @@ function NewerRelease() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={text.name}
-      aria-describedby={tipId}
       onKeyDown={(e) => {
         // The first Escape hides only the tip; the next one reaches the
         // drawer's document listener and closes the drawer as usual.
@@ -163,7 +162,7 @@ function NewerRelease() {
       onMouseLeave={() => setDismissed(false)}
     >
       <Icon name="update" size={14} />
-      <span id={tipId} role="tooltip" className="shell-brand__tip">
+      <span aria-hidden="true" className="shell-brand__tip">
         {text.tooltip}
       </span>
     </a>
