@@ -85,4 +85,11 @@ type Alert struct {
 	Message   string   `json:"message"`
 	CreatedAt int64    `json:"created_at"` // unix seconds
 	AckedAt   int64    `json:"acked_at"`   // unix seconds; 0 = unacked
+
+	// Standing marks a raise of a condition that is re-checked every cycle and
+	// retired by its owner's resolve path (Store.ResolveAlerts). Its row stays the
+	// one alert for that condition until it is resolved, acknowledged or not, so
+	// acknowledging it silences it while the condition persists (design
+	// architecture §10). It steers the raise only and is not persisted.
+	Standing bool `json:"-"`
 }

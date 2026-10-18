@@ -63,6 +63,7 @@ type Store interface {
 	GetFrameByID(ctx context.Context, id int64) (*model.Frame, bool, error)
 	ListFrames(ctx context.Context, rigID, state, filter string, page, pageSize int) (frames []model.Frame, total int, err error)
 	ListTransferHistory(ctx context.Context, rigID string, from, to int64, page, pageSize int) (frames []model.Frame, total int, err error)
+	ListNeverDeletable(ctx context.Context, rigID string, page, pageSize int) (frames []model.Frame, total int, err error)
 	RecentFrames(ctx context.Context, rigID string, limit int) ([]model.Frame, error)
 	DeletionEligible(ctx context.Context, rigID string, graceCutoff int64) ([]model.Frame, error)
 	UnclassifiedFrames(ctx context.Context, rigID string) ([]model.Frame, error)
@@ -195,7 +196,8 @@ type Store interface {
 	RebuildNightCounters(ctx context.Context, entries []NightEntry) error
 
 	// Alerts (design architecture §10).
-	RaiseAlert(ctx context.Context, a model.Alert) (int64, error)
+	RaiseAlert(ctx context.Context, a model.Alert) (id int64, created bool, err error)
+	ResolveAlerts(ctx context.Context, rigID string, category model.Category, messagePrefix string, at int64) (int, error)
 	ListAlerts(ctx context.Context, includeAcked bool, limit int) ([]model.Alert, error)
 	AckAlert(ctx context.Context, id int64, at int64) error
 	UnackedCount(ctx context.Context) (int, error)
@@ -289,6 +291,7 @@ var migrations = []migration{
 	{version: 8, up: migrate8},
 	{version: 9, up: migrate9},
 	{version: 10, up: migrate10},
+	{version: 11, up: migrate11},
 }
 
 // migrate1 creates the initial schema exactly as the design architecture §7 DDL
@@ -560,6 +563,25 @@ CREATE TABLE supersede_intents (
 `
 	_, err := tx.ExecContext(ctx, ddl)
 	return err
+}
+
+// migrate11 adds alerts.resolved_at, the time a standing condition's owner saw it
+// clear (design architecture §10). It is separate from acked_at because an
+// operator's acknowledgement silences a condition while it persists, and only a
+// resolve lets the same condition raise anew. The old schema recorded both as
+// acked_at, so every row acknowledged before this version is read as resolved: a
+// condition the operator acknowledged and that still holds raises once more after
+// the upgrade, which is louder than needed but never silences a returning one.
+func migrate11(ctx context.Context, tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE alerts ADD COLUMN resolved_at INTEGER`,
+		`UPDATE alerts SET resolved_at = acked_at WHERE acked_at IS NOT NULL`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrate reads (or initializes) meta.schema_version and runs ordered forward
@@ -1355,10 +1377,6 @@ func (s *sqlStore) ListTransferHistory(ctx context.Context, rigID string, from, 
 	// sentinel stores as NULL, so this excludes never-pulled (failed/held) frames.
 	where := []string{"pulled_at IS NOT NULL"}
 	var args []any
-	if rigID != "" {
-		where = append(where, "rig_id=?")
-		args = append(args, rigID)
-	}
 	if from > 0 {
 		where = append(where, "pulled_at >= ?")
 		args = append(args, from)
@@ -1366,6 +1384,29 @@ func (s *sqlStore) ListTransferHistory(ctx context.Context, rigID string, from, 
 	if to > 0 {
 		where = append(where, "pulled_at <= ?")
 		args = append(args, to)
+	}
+	return s.historyPage(ctx, rigID, where, args, page, pageSize)
+}
+
+// neverDeletableWhere selects the frames that are never removed from the device:
+// held and failed always, unclassified only while not culled, since a culled one
+// is leaving the device through the cull drain (design library-reconciliation
+// §11.5, I36). It is the backlog alert's condition (design architecture §10).
+const neverDeletableWhere = `(state IN ('held','failed') OR (state='unclassified' AND missing_seen_at IS NULL))`
+
+// ListNeverDeletable returns a page of a rig's never-deletable frames (rigID ""
+// spans every rig), newest first, pulled or not, with the unpaginated total: the
+// frames behind the backlog alert, which links to exactly this list.
+func (s *sqlStore) ListNeverDeletable(ctx context.Context, rigID string, page, pageSize int) ([]model.Frame, int, error) {
+	return s.historyPage(ctx, rigID, []string{neverDeletableWhere}, nil, page, pageSize)
+}
+
+// historyPage runs one newest-first page of a history query: where/args are the
+// view's predicates, to which a non-empty rigID adds the rig scope.
+func (s *sqlStore) historyPage(ctx context.Context, rigID string, where []string, args []any, page, pageSize int) ([]model.Frame, int, error) {
+	if rigID != "" {
+		where = append(where, "rig_id=?")
+		args = append(args, rigID)
 	}
 	clause := " WHERE " + strings.Join(where, " AND ")
 
@@ -2460,21 +2501,30 @@ func (s *sqlStore) RebuildNightCounters(ctx context.Context, entries []NightEntr
 
 // --- alerts --------------------------------------------------------------------
 
-// RaiseAlert inserts an alert row and returns its id. To avoid flooding the UI
-// with rapidly-repeated identical problems, it skips insertion when an identical
-// unacked (rig, category, message) alert already exists, returning that row's id.
-func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, error) {
+// RaiseAlert inserts an alert row and returns its id, with created reporting
+// whether a row was inserted; only a created row is news the notifier announces.
+// An identical (rig, category, message) alert that still stands absorbs the raise
+// and its id is returned instead. What "still stands" means depends on the raise
+// (design architecture §10): for an event it is a row not yet acknowledged, so the
+// same problem happening after an acknowledgement is raised again; for a standing
+// condition (a.Standing) it is a row not yet resolved, acknowledged or not, so an
+// acknowledgement holds until the condition's owner resolves it.
+func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, error) {
+	open := `acked_at IS NULL`
+	if a.Standing {
+		open = `resolved_at IS NULL`
+	}
 	var existing int64
 	err := s.write.QueryRowContext(ctx,
 		`SELECT id FROM alerts
-		 WHERE rig_id IS ? AND category=? AND message=? AND acked_at IS NULL
+		 WHERE rig_id IS ? AND category=? AND message=? AND `+open+`
 		 ORDER BY id DESC LIMIT 1`,
 		nullStr(a.RigID), string(a.Category), a.Message).Scan(&existing)
 	if err == nil {
-		return existing, nil
+		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("dedup-check alert: %w", err)
+		return 0, false, fmt.Errorf("dedup-check alert: %w", err)
 	}
 
 	res, err := s.write.ExecContext(ctx,
@@ -2482,9 +2532,31 @@ func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, error)
 		 VALUES (?,?,?,?,?,?)`,
 		nullStr(a.RigID), string(a.Severity), string(a.Category), a.Message, a.CreatedAt, nullInt(a.AckedAt))
 	if err != nil {
-		return 0, fmt.Errorf("raise alert: %w", err)
+		return 0, false, fmt.Errorf("raise alert: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}
+
+// ResolveAlerts records that a condition cleared: every unresolved alert of the
+// rig (rigID "" for a fleet-wide one) and category whose message starts with
+// messagePrefix ("" for any) is marked resolved at `at`, and acknowledged at `at`
+// unless the operator already acknowledged it. A resolved row no longer absorbs a
+// standing raise, so the condition raises anew if it returns. It returns the
+// number of rows resolved.
+func (s *sqlStore) ResolveAlerts(ctx context.Context, rigID string, category model.Category, messagePrefix string, at int64) (int, error) {
+	res, err := s.write.ExecContext(ctx,
+		`UPDATE alerts SET resolved_at=?, acked_at=COALESCE(acked_at, ?)
+		 WHERE rig_id IS ? AND category=? AND resolved_at IS NULL AND substr(message, 1, ?)=?`,
+		at, at, nullStr(rigID), string(category), len([]rune(messagePrefix)), messagePrefix)
+	if err != nil {
+		return 0, fmt.Errorf("resolve %s alerts: %w", category, err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // nullStr maps an empty rig id (a fleet-wide alert) to SQL NULL.

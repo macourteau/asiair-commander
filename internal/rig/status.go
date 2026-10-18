@@ -203,13 +203,14 @@ func (w *Worker) publishListingStatus(ctx context.Context, cfg *model.Config, pr
 				Severity: model.SeverityWarn,
 				Category: model.AlertNASDiskLow,
 				Message:  "NAS destination free space is below the reserve; pulls will pause",
+				Standing: true,
 			})
 		} else {
 			// Space freed up; a standing low-disk warning is stale.
-			w.ackFleetAlerts(ctx, model.AlertNASDiskLow)
+			w.resolveFleetAlerts(ctx, model.AlertNASDiskLow)
 		}
 		// The destination is readable again; clear any standing unreadable alert.
-		w.ackFleetAlerts(ctx, model.AlertDestinationUnavailable)
+		w.resolveFleetAlerts(ctx, model.AlertDestinationUnavailable)
 	} else {
 		// Unreadable is not the same condition as full: it needs its own alert, or a
 		// rig stalled behind an unmounted destination stalls silently.
@@ -218,6 +219,7 @@ func (w *Worker) publishListingStatus(ctx context.Context, cfg *model.Config, pr
 			Severity: model.SeverityWarn,
 			Category: model.AlertDestinationUnavailable,
 			Message:  "the NAS destination can't be read; pulls are paused",
+			Standing: true,
 		})
 	}
 	// A staging write fault is this rig's own observation — the volume answered the
@@ -231,9 +233,10 @@ func (w *Worker) publishListingStatus(ctx context.Context, cfg *model.Config, pr
 			Severity: model.SeverityWarn,
 			Category: model.AlertDestinationUnavailable,
 			Message:  "the NAS destination can't be written; pulls are paused until it accepts writes again",
+			Standing: true,
 		})
 	} else {
-		w.ackAlerts(ctx, model.AlertDestinationUnavailable)
+		w.resolveAlerts(ctx, model.AlertDestinationUnavailable)
 	}
 
 	w.checkBacklogAndCapacity(ctx, cfg, profile, tightest)
@@ -271,23 +274,27 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 		sev := model.SeverityWarn
 		// No frame count in the message: it fluctuates each cycle and would defeat
 		// the (rig, category, message) dedup, flooding a new alert per poll. The
-		// count is visible on the device page.
-		msg := fmt.Sprintf("never-deletable frames (unclassified/held/failed) remain on rig %q", profile.Name)
+		// Alerts page links the alert to exactly these frames (store
+		// ListNeverDeletable), where the count is.
+		msg := fmt.Sprintf("Some frames on %q can't be removed from the device automatically because they are "+
+			"unclassified, held or failed; they stay on it, using its space, until each one is fixed or dismissed.", profile.Name)
 		if profile.CapacityConstrained && deviceLow {
 			sev = model.SeverityCritical
-			msg = "CAPTURE MAY STOP: " + msg + "; device free space is low and these frames are never removed"
+			msg = fmt.Sprintf("Capture may stop on %q: its device is low on free space, and some frames on it can't be "+
+				"removed automatically because they are unclassified, held or failed.", profile.Name)
 		}
 		w.notify.Raise(ctx, model.Alert{
 			RigID:    w.profileID,
 			Severity: sev,
 			Category: model.AlertBacklog,
 			Message:  msg,
+			Standing: true,
 		})
 		w.backlogRaised = true
 	} else if w.backlogRaised {
 		// The never-deletable set just emptied: ack the aggregate backlog alert once,
 		// on this resolving cycle only, so a healthy rig never scans alerts per cycle.
-		w.ackAlerts(ctx, model.AlertBacklog)
+		w.resolveAlerts(ctx, model.AlertBacklog)
 		w.backlogRaised = false
 	}
 
@@ -298,7 +305,8 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 			Category: model.AlertDeviceDiskLow,
 			// Stable message (no byte count) so the alert dedups per condition; the
 			// live figure is on the dashboard.
-			Message: fmt.Sprintf("device free space is low on rig %q (tightest share below reserve)", profile.Name),
+			Message:  fmt.Sprintf("device free space is low on rig %q (tightest share below reserve)", profile.Name),
+			Standing: true,
 		})
 		w.deviceLowRaised = true
 	} else if w.deviceLowRaised {
@@ -306,35 +314,21 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 		// the resolving cycle only, so a healthy rig never scans alerts every cycle.
 		// Without this the warning stands forever once raised — there is no other
 		// path that retires it.
-		w.ackAlerts(ctx, model.AlertDeviceDiskLow)
+		w.resolveAlerts(ctx, model.AlertDeviceDiskLow)
 		w.deviceLowRaised = false
 	}
 }
 
-// countNeverDeletable sums the rig's frames in the states that are never removed
-// from the device — the driver of the backlog alert. held/failed always count; an
-// unclassified frame counts only while NOT culled: a culled (missing) unclassified
-// frame is now on its way off the device via the cull drain, so it must drop out of
-// the "never removed" count and message (design library-reconciliation §11.5,
-// I36). ListFrames has no missing_seen_at predicate, so the culled ones are filtered
-// out in Go over the (small) unclassified backlog materialized by UnclassifiedFrames.
+// countNeverDeletable counts the rig's frames that are never removed from the
+// device — the driver of the backlog alert. The predicate lives in the store
+// (ListNeverDeletable: held, failed, and unclassified not culled, design
+// library-reconciliation §11.5, I36) so the alert's condition and the frames its
+// link lists are one query.
 func (w *Worker) countNeverDeletable(ctx context.Context) int {
-	n := 0
-	for _, state := range []model.FrameState{model.StateHeld, model.StateFailed} {
-		if _, total, err := w.store.ListFrames(ctx, w.profileID, string(state), "", 0, 1); err == nil {
-			n += total
-		} else {
-			w.log.Warn("rig: never-deletable count query failed", "state", state, "error", err)
-		}
-	}
-	if frames, err := w.store.UnclassifiedFrames(ctx, w.profileID); err == nil {
-		for _, f := range frames {
-			if f.MissingSeenAt == 0 {
-				n++
-			}
-		}
-	} else {
-		w.log.Warn("rig: never-deletable unclassified count query failed", "error", err)
+	_, n, err := w.store.ListNeverDeletable(ctx, w.profileID, 0, 1)
+	if err != nil {
+		w.log.Warn("rig: never-deletable count query failed", "error", err)
+		return 0
 	}
 	return n
 }
@@ -347,7 +341,7 @@ func (w *Worker) countNeverDeletable(ctx context.Context) int {
 // rare operator action, so an unconditional count+scan here is free.
 func (w *Worker) maybeAckBacklog(ctx context.Context) {
 	if w.countNeverDeletable(ctx) == 0 {
-		w.ackAlerts(ctx, model.AlertBacklog)
+		w.resolveAlerts(ctx, model.AlertBacklog)
 		w.backlogRaised = false
 	}
 }

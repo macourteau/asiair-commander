@@ -246,7 +246,7 @@ func (w *Worker) trackStall(ctx context.Context, cy cycle, progressed, pullFaile
 		}
 		w.stallPasses, w.stallBlocked = 0, 0
 		if w.stallRaised {
-			w.ackAlerts(ctx, model.AlertRemoteStalled)
+			w.resolveAlerts(ctx, model.AlertRemoteStalled)
 			w.stallRaised = false
 		}
 		return
@@ -273,6 +273,7 @@ func (w *Worker) trackStall(ctx context.Context, cy cycle, progressed, pullFaile
 		Category: model.AlertRemoteStalled,
 		Message: fmt.Sprintf("rig %q is making no progress through remote %q: %d passes in a row failed while its tunnel was up, %d delete attempts blocked",
 			cy.profile.Name, w.st.RemoteName, w.stallPasses, w.stallBlocked),
+		Standing: true,
 	})
 	w.stallRaised = true
 }

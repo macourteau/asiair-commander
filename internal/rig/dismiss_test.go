@@ -263,7 +263,7 @@ func TestDismissClearsTransferHistorySurfaces(t *testing.T) {
 
 func TestDismissAutoAcksBacklogAlert(t *testing.T) {
 	seedBacklog := func(h *harness, ctx context.Context) {
-		if _, err := h.store.RaiseAlert(ctx, model.Alert{
+		if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 			RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertBacklog,
 			Message: "never-deletable frames remain", CreatedAt: h.nowVal.Unix(),
 		}); err != nil {

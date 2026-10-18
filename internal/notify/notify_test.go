@@ -25,15 +25,15 @@ type fakeStore struct {
 	nextID       int64
 }
 
-func (s *fakeStore) RaiseAlert(_ context.Context, a model.Alert) (int64, error) {
+func (s *fakeStore) RaiseAlert(_ context.Context, a model.Alert) (int64, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.raiseErr != nil {
-		return 0, s.raiseErr
+		return 0, false, s.raiseErr
 	}
 	s.nextID++
 	s.raised = append(s.raised, a)
-	return s.nextID, nil
+	return s.nextID, true, nil
 }
 
 func (s *fakeStore) UnackedCount(_ context.Context) (int, error) {
@@ -203,7 +203,7 @@ type fullFakeStore struct {
 	inner *fakeStore
 }
 
-func (f fullFakeStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, error) {
+func (f fullFakeStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, error) {
 	return f.inner.RaiseAlert(ctx, a)
 }
 

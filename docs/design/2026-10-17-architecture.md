@@ -310,7 +310,7 @@ pure functions with no I/O, exhaustively unit-testable against real header fixtu
 | `Store` (`internal/store`) | operational state (§7.7) | SQLite | temp database |
 | `Clock` (`internal/clock`) | wall time, monotonic instants, device-time offset in typed domains | wall and monotonic clocks | fixed clock for settle, grace and night tests |
 | `StatusHub` (`internal/hub`) | `PublishRig`, `Snapshot`, `Subscribe`, `Emit` | in memory | used directly |
-| `Notifier` (`internal/notify`) | `Raise(alert)`, the single alert choke point (§10) | store row plus SSE event plus badge refresh | captured in tests |
+| `Notifier` (`internal/notify`) | `Raise(alert)`, the single alert choke point (§10) | store row, plus SSE event and badge refresh when the row is new | captured in tests |
 | Site registry (`internal/netsite`) | routes each dial and probe to the network its endpoint names | local network; tunnel per remote ([remote-sites §3](2026-10-17-remote-sites.md)) | fake sites |
 
 Two free-space calls must not be conflated. `Share.Statfs` reports one device share's own
@@ -573,7 +573,7 @@ that rig's pulls until a probe passes.
 |---|---|
 | `frames` | One row per device file, unique on `(rig_id, source_share, source_path)`. |
 | `night_counters` | `UNIQUE(target, ota, observing_date) → night`, the persisted night ordinals ([routing-and-filing §6](2026-10-17-routing-and-filing.md)). |
-| `alerts` | `rig_id` (NULL for a fleet-wide alert), severity, category, message, created and acknowledged times (§10). |
+| `alerts` | `rig_id` (NULL for a fleet-wide alert), severity, category, message, created, acknowledged and resolved times (§10). |
 | `log_pulls` | One row per pulled device log: rig, type, source and destination path, size, time (§11). |
 | `meta` | Key/value: the store's `schema_version`, plus small per-rig records such as pause state, last-known endpoints, pending guid binds, media identities and library ids. |
 | `refile_intents` | Open re-file moves, recovered at startup ([routing-and-filing §8.6](2026-10-17-routing-and-filing.md)). |
@@ -1372,22 +1372,68 @@ These hold on every surface and are requirements on the copy, not decoration:
 
 **In the web UI only** — no push, chat, webhook or browser notifications. Alerts are
 **problem-only**, raised from Commander's own state through the single `Notifier`, which
-persists the row, emits `alert.raised` and refreshes the badge. Three properties hold for
-every category:
+persists the row and, **only when that created a new row**, emits `alert.raised` (which the
+SPA toasts and announces to screen readers), records `alerts_raised_total`, logs it and
+refreshes the badge. A raise absorbed by an existing row is the same alert seen again and is
+logged at debug only. Four properties hold for every category:
 
-- **Deduplication.** The store collapses an identical unacknowledged
-  `(rig_id, category, message)` tuple onto the existing row. Messages therefore carry no
-  fluctuating values (no byte counts, no frame counts); live figures are on the dashboard.
-  The dedup is not severity-aware: the same tuple raised at another severity keeps the first
-  row's.
+- **Deduplication.** The store collapses an identical `(rig_id, category, message)` tuple
+  that still stands onto the existing row and reports that nothing was created. Messages
+  therefore carry no fluctuating values (no byte counts, no frame counts); live figures are on
+  the dashboard, or behind the alert's link. The dedup is not severity-aware: the same tuple
+  raised at another severity keeps the first row's.
+- **Events and standing conditions.** Most raisers re-check a condition every cycle and raise
+  it again each time it holds; these raise it as **standing** (`Alert.Standing`). A standing
+  row "still stands" until the condition's owner **resolves** it (`resolved_at`), whether or
+  not the operator acknowledged it, so an acknowledgement holds for as long as the condition
+  persists, across restarts, and the condition raises a new row only after it has cleared and
+  returned. Every other raise is an **event** (a transfer that failed, a frame lost): its row
+  stands until acknowledged, and the same problem happening after an acknowledgement is news
+  and raises again.
 - **Scope.** A condition of the shared NAS (the destination volume, a library root) is
   raised **fleet-wide** with a NULL `rig_id`, so one unmounted volume is one row however many
   rigs observe it. A remote-level alert names its remote in a fixed message prefix, so it is
   found again after a rename.
-- **Auto-acknowledge on the resolving transition.** A condition that clears acknowledges its
-  standing alert once, on the cycle it resolves (fleet-scoped conditions through a
-  fleet-scoped helper), so a healthy rig never scans alerts every cycle and no warning stands
-  forever after its cause is gone.
+- **Resolve on the resolving transition.** A condition that clears resolves its standing
+  alert once, on the cycle it resolves (fleet-scoped conditions through a fleet-scoped
+  helper; a category that carries several conditions, `config` and the library roots, by
+  message prefix), acknowledging it if the operator had not, so a healthy rig never touches
+  the alert table every cycle and no warning stands forever after its cause is gone. Where a
+  latch gates this, it starts "raised", so the first clear cycle after a restart retires a
+  row a previous process left.
+
+The standing raisers are `backlog`, `device_disk_low`, `nas_disk_low`,
+`destination_unavailable`, `unreachable`, `identity_unconfirmed`, `remote_stalled`, every
+remote-level alert, `library_unavailable`, `library_mismatch`, and the `config` alerts for an
+unreadable destination volume and for frames filed under no configured root. Two
+per-cycle conditions stay events on purpose: `identity_mismatch` and `media_changed` are
+critical evidence that only a reset settles, and a standing row would silence a recurrence
+behind an old acknowledgement until that reset. While such a condition holds, acknowledging
+it brings it back on the next session — once per acknowledgement, never once per poll. The
+per-frame failures (`transfer_failed` for a delete that keeps failing or a restore that keeps
+failing) stay events too, re-raised at their retry cadence after an acknowledgement.
+Pinned by `TestRaiseAlertReportsWhetherItCreatedARow`,
+`TestStandingAlertStaysAcknowledgedWhileItsConditionPersists`,
+`TestStandingAlertStaysAcknowledgedAcrossReopen`, `TestStandingAlertRaisesAgainAfterResolve`
+(`internal/store`), `TestRaiseOfAStandingUnackedAlertDoesNotReannounce`,
+`TestRaiseAfterAckOfAPersistingConditionStaysQuiet` (`internal/notify`) and
+`TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears` (`internal/rig`).
+
+**Rejected alternatives.**
+
+| Rejected | Why |
+|---|---|
+| Suppress announcements in memory (a per-worker "already raised" latch) | Lost on restart: the first cycle of a new process would find no unacknowledged row and mint a new one, so an acknowledgement would not survive an upgrade or a crash. The acknowledgement is persisted state, so the suppression is read from the same row. |
+| Dedup a standing raise against the newest row whatever its acknowledgement | Cannot tell an operator's acknowledgement from the auto-acknowledgement of a cleared condition (both set `acked_at`), so a condition that cleared and came back would stay silent forever. `resolved_at` records the clear separately. |
+| Delete a resolved condition's row instead of a `resolved_at` column | Loses the history under "Show acknowledged" and the record that a condition happened. |
+| A per-category list of standing categories in the store | Several categories carry both kinds (`config`, `transfer_failed`), and the raiser is the one that knows whether it will resolve what it raises. |
+| A frame count in the backlog message | Defeats the dedup: every count change would be a new alert. The count is one click away behind the alert's link to History (`?view=never_deletable`), which lists exactly the frames the condition counts (`Store.ListNeverDeletable`, the same predicate). |
+
+Rows acknowledged before `resolved_at` existed (store schema 11) read as resolved: the old
+schema could not tell the two apart, and reading them as standing could silence a returning
+condition. A condition the operator had acknowledged that still holds raises once more after
+the upgrade. Retention prunes acknowledged rows after seven days, resolved or not; a
+condition acknowledged and still standing past that raises once more, as a reminder.
 
 | Category | Raised when | Owner |
 |---|---|---|
@@ -1397,7 +1443,7 @@ every category:
 | `frame_lost` | a doubly-vanished frame, or a reused path whose old copy is not proven | [frame-lifecycle §4.2, §9.4](2026-10-17-frame-lifecycle.md) |
 | `rot_clash` | a different-content clash at a frame's canonical name (possible rot) | [frame-lifecycle §8.3](2026-10-17-frame-lifecycle.md) |
 | `unclassified` | unknown `IMAGETYP`, a missing routing-critical value, or a FITS parse failure | [routing-and-filing §2](2026-10-17-routing-and-filing.md) |
-| `backlog` | any never-deletable frames (`unclassified` not culled, `held`, `failed`) remain on a rig; **critical "capture may stop"** on a `capacity_constrained` rig whose tightest watched share is below `disk_reserve_bytes` | below |
+| `backlog` | any never-deletable frames (`unclassified` not culled, `held`, `failed`) remain on a rig, named by its display name; **critical "capture may stop"** on a `capacity_constrained` rig whose tightest watched share is below `disk_reserve_bytes`. The Alerts page links it to those frames in History | below |
 | `device_disk_low` | a rig's tightest watched share is below `disk_reserve_bytes` | below |
 | `nas_disk_low` | NAS free space below `disk_reserve_bytes` (fleet-wide) | §7.6 |
 | `destination_unavailable` | the NAS destination cannot be read (fleet-wide), or a rig's staging write probe fails (rig-scoped) | §7.6 |
@@ -1907,7 +1953,7 @@ enum values. The design depends on these families:
 | Filing | `frames_filed_total{rig, class, disposition}`, `transfer_bytes_wasted_total`, `frame_upsert_failures_total` | `disposition` is `fresh`, `adopted` (an identical copy existed; the streamed bytes were paid for and thrown away, counted as wasted) or `reclassified` (zero network bytes), threaded in explicitly (P6). `class` maps the frame type with the zero value and anything unknown to `unknown`. An upsert failure after a successful transfer is the worst outcome in the system, so it is counted. |
 | Delete | `frames_deleted_total{rig, manner}`, `delete_blocked_total{rig, reason}`, `frames_lost_total{rig, cause}`, `nas_restores_total{rig, result}`, `delete_pass_yield_total`, `delete_hash_interrupted_total` | `manner` separates `device_deleted` from `source_vanished` (no delete issued) and from the cull-drain pair `culled` and `culled_acked`, and the device-delete helper reports when its final re-stat found the file already gone, so `device_deleted` does not overcount. `delete_blocked_total` carries the typed hold reasons **plus the quiet paths** that stop a rig deleting without an alert — an unconfirmed removable medium, a source changed just before delete, a source disagreeing with its row (deferred under a bound, its own value because it fires once per pass rather than once per frame). `frames_lost_total` is the only durable trace of a doubly-vanished frame, since it changes no row. `nas_restores_total` is the only signal of restore traffic: a successful restore re-reads the whole file over the network yet leaves no row change and no event. A restore has two success shapes and several failures, each its own `result`. The slicing families are [frame-lifecycle §12.7](2026-10-17-frame-lifecycle.md). |
 | Cycle | `cycles_total{rig, result}`, `cycle_duration_seconds{rig, phase}`, `pull_phase_refused_total{rig, reason}` | Observed inside the recover defer (P7). `result="ok"` means only that the device answered the probe and the cycle ran to completion: it also covers a paused rig, a `keep_originals` rig and a cycle stopped by the destination latch (§7.6), so it does not mean frames moved. A refused pull phase (session open failed, identity foreign or unconfirmed) skips the delete pass, so a rig silently not deleting is visible. |
-| Listing and alerts | `listing_entries{rig, share}` with `listing_timestamp_seconds{rig, share}`; `alerts_raised_total{category, severity}` | The timestamp tells a fresh count from a stale one, since the listing loop continues past failed shares. There is no runtime truncation detector, by design — a client cannot know a listing was cut short, so the guard is the integration test (§14.4) — but a count that pins to a round number while frames keep arriving is a visible signature on a graph. `alerts_raised_total` counts persisted raise attempts after the non-severity-aware dedup (§10), so it legitimately disagrees with the alerts table. |
+| Listing and alerts | `listing_entries{rig, share}` with `listing_timestamp_seconds{rig, share}`; `alerts_raised_total{category, severity}` | The timestamp tells a fresh count from a stale one, since the listing loop continues past failed shares. There is no runtime truncation detector, by design — a client cannot know a listing was cut short, so the guard is the integration test (§14.4) — but a count that pins to a round number while frames keep arriving is a visible signature on a graph. `alerts_raised_total` counts alert rows created, so a condition re-checked every cycle counts once per occurrence, not once per cycle (§10); the dedup is not severity-aware, so a re-raise at another severity counts nothing. |
 | State gauges | §17.2 | `rig_up` per rig replaces any aggregate: `sum()` recovers the aggregate, while an aggregate cannot say *which* rig is down. `time() - rig_last_listing_timestamp_seconds > 900` catches a wedged worker, a dead SMB session and a rig off the network, which no counter reveals alone. |
 | Drops | `hub_subscribers_dropped_total`, `log_entries_dropped_total`, `worker_commands_dropped_total{rig}`, `preview_warms_dropped_total` | Separate metrics, not one `{sink}` label: their units differ (subscribers, log entries, commands, warms), so a shared counter could not be summed meaningfully. No log line at the log-buffer drop site (P1). The solve-nudge channel is excluded: the database is the queue of record, so a dropped nudge costs latency, not work, and counting it would poison any "losing work" alert. |
 | Re-file and remotes | `refile_frames_total`; `remote_*` | [routing-and-filing §8.8](2026-10-17-routing-and-filing.md); [remote-sites §8](2026-10-17-remote-sites.md). |

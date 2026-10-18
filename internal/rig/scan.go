@@ -66,15 +66,22 @@ func (w *Worker) scanLibrary(ctx context.Context, cfg *model.Config, profile *mo
 
 	// Rows whose dest_path falls under no configured root are invisible to the
 	// per-root walk; report them so a repointed root does not silently orphan them.
+	// Standing, with no count in the message so the alert stays one row while the
+	// count moves, and resolved by the first scan that finds none (design
+	// architecture §10).
 	if n, err := w.store.CountOutsideRoots(ctx, w.profileID, roots); err != nil {
 		w.log.Warn("rig: outside-roots count failed", "error", err)
 	} else if n > 0 {
+		w.log.Info("rig: frames reference a path under no configured library root", "count", n)
 		w.notify.Raise(ctx, model.Alert{
 			RigID:    w.profileID,
 			Severity: model.SeverityWarn,
 			Category: model.AlertConfig,
-			Message:  fmt.Sprintf("%d frame(s) reference a path under no configured library root; relink or restore the root", n),
+			Message:  outsideRootsAlert,
+			Standing: true,
 		})
+	} else {
+		w.resolveAlertsByPrefix(ctx, model.AlertConfig, outsideRootsAlert)
 	}
 
 	for _, root := range roots {
@@ -248,6 +255,17 @@ func (w *Worker) reconcileDir(ctx context.Context, dir string, frames []store.Sc
 	return newlyMissing
 }
 
+// outsideRootsAlert is the message of the alert for frames filed under no
+// configured root; it is also the prefix that resolves it.
+const outsideRootsAlert = "Some frames reference a path under no configured library root; relink or restore the root"
+
+// The root alerts' messages start with these, per root, which is how a
+// confirmed root resolves its own alerts and no other root's.
+func libraryMismatchPrefix(root string) string {
+	return "a different library is mounted at destination root " + root + ";"
+}
+func libraryUnavailablePrefix(root string) string { return "destination root " + root + " is " }
+
 // rootUnavailableKey is the per-root meta key tracking a first-failure time.
 func rootUnavailableKey(root string) string { return "rootunavail:" + RootKey(root) }
 
@@ -267,7 +285,8 @@ func (w *Worker) handleRootUnavailable(ctx context.Context, root, reason string)
 			RigID:    w.profileID,
 			Severity: model.SeverityCritical,
 			Category: model.AlertLibraryMismatch,
-			Message:  "a different library is mounted at destination root " + root + "; reconciliation is paused. If this is your library, re-link it under Settings › Library.",
+			Message:  libraryMismatchPrefix(root) + " reconciliation is paused. If this is your library, re-link it under Settings › Library.",
+			Standing: true,
 		})
 		return
 	}
@@ -288,17 +307,22 @@ func (w *Worker) handleRootUnavailable(ctx context.Context, root, reason string)
 			RigID:    w.profileID,
 			Severity: model.SeverityWarn,
 			Category: model.AlertLibraryUnavailable,
-			Message:  fmt.Sprintf("destination root %s is %s and has not reconciled for 6 h. If the marker file was removed, re-link it under Settings › Library; if the NAS is unmounted, remount it.", root, reason),
+			Message: libraryUnavailablePrefix(root) + reason + " and has not reconciled for 6 h. If the marker file was removed, " +
+				"re-link it under Settings › Library; if the NAS is unmounted, remount it.",
+			Standing: true,
 		})
 	}
 }
 
 // clearRootUnavailable clears a root's first-failure marker on a successful
-// confirmation (any rig's success clears it, since the key is per root).
+// confirmation (any rig's success clears it, since the key is per root) and
+// resolves this rig's standing alerts for the root.
 func (w *Worker) clearRootUnavailable(ctx context.Context, root string) {
 	if v, ok, _ := w.store.GetMeta(ctx, rootUnavailableKey(root)); ok && v != "" {
 		_ = w.store.SetMeta(ctx, rootUnavailableKey(root), "")
 	}
+	w.resolveAlertsByPrefix(ctx, model.AlertLibraryMismatch, libraryMismatchPrefix(root))
+	w.resolveAlertsByPrefix(ctx, model.AlertLibraryUnavailable, libraryUnavailablePrefix(root))
 }
 
 // publishScanResult stores the scan result on the live status, which carries it to

@@ -1775,6 +1775,7 @@ func (w *Worker) handleOffline(ctx context.Context, cfg *model.Config, profile *
 			Severity: model.SeverityWarn,
 			Category: model.AlertUnreachable,
 			Message:  fmt.Sprintf("rig %q unreachable for over %s", profile.Name, after),
+			Standing: true,
 		})
 		w.unreachableAlerted = true
 	}
@@ -1825,7 +1826,7 @@ func (w *Worker) markOnline(ctx context.Context) {
 		// The rig is reachable again, so a standing "unreachable" alert is resolved.
 		// Auto-ack it (like the identity/media/unclassified alerts do on resolve) so it
 		// clears from the badge instead of lingering until the operator dismisses it.
-		w.ackAlerts(ctx, model.AlertUnreachable)
+		w.resolveAlerts(ctx, model.AlertUnreachable)
 	}
 	w.wasOnline = true
 	w.unreachableSince = time.Time{}

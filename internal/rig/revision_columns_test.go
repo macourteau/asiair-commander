@@ -168,6 +168,7 @@ ALTER TABLE frames DROP COLUMN archive_sha256;
 ALTER TABLE frames DROP COLUMN archive_size;
 ALTER TABLE frames DROP COLUMN delete_defer_count;
 DROP TABLE supersede_intents;
+ALTER TABLE alerts DROP COLUMN resolved_at;
 UPDATE meta SET value='8' WHERE key='schema_version';
 `
 	if _, err := raw.ExecContext(context.Background(), ddl); err != nil {
@@ -209,7 +210,7 @@ func TestDayZeroMigrationSeedsTheArchiveAnchors(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 	downgradeToSchema8(t, dbPath)
-	migrated, err := store.Open(dbPath) // runs migrate9 and migrate10
+	migrated, err := store.Open(dbPath) // runs migrate9 through migrate11
 	if err != nil {
 		t.Fatalf("re-open (migrate): %v", err)
 	}

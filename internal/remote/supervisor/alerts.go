@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/macourteau/asiair-commander/internal/model"
@@ -17,11 +16,10 @@ import (
 // ten.
 const relayGrace = 30 * time.Second
 
-// AlertStore is where the remotes' alerts are found again to acknowledge them
-// once their condition clears (store.Store).
+// AlertStore is where the remotes' alerts are resolved once their condition
+// clears (store.Store).
 type AlertStore interface {
-	ListAlerts(ctx context.Context, includeAcked bool, limit int) ([]model.Alert, error)
-	AckAlert(ctx context.Context, id int64, at int64) error
+	ResolveAlerts(ctx context.Context, rigID string, category model.Category, messagePrefix string, at int64) (int, error)
 	UnackedCount(ctx context.Context) (int, error)
 }
 
@@ -97,7 +95,7 @@ func (s *Supervisor) logTransition(prev model.RemoteState, st model.RemoteStatus
 	}
 }
 
-// stickyAlerts are not acknowledged when their condition clears: a rejected
+// stickyAlerts are not resolved when their condition clears: a rejected
 // foreign key is evidence the pairing leaked, which only a Re-pair (or the
 // user) settles.
 var stickyAlerts = map[model.Category]bool{model.AlertRemoteForeignKey: true}
@@ -120,11 +118,11 @@ const (
 	latchRaised
 )
 
-// alertRemotes raises each remote's alerts whose condition holds and
-// acknowledges those whose condition has cleared, each once per transition.
-// Until an alert is first evaluated, either action is taken: the store merges
-// a raise into an identical standing alert, and an ack retires one a previous
-// process left behind. Caller holds s.pubMu, which guards s.latches.
+// alertRemotes raises each remote's alerts whose condition holds and resolves
+// those whose condition has cleared, each once per transition. Until an alert is
+// first evaluated, either action is taken: the store merges a raise into an
+// identical standing alert, acknowledged or not (design architecture §10), and a
+// resolve retires one a previous process left behind. Caller holds s.pubMu, which guards s.latches.
 func (s *Supervisor) alertRemotes(list []model.RemoteStatus) {
 	if s.notify == nil {
 		return
@@ -145,11 +143,11 @@ func (s *Supervisor) alertRemotes(list []model.RemoteStatus) {
 			raise, clear, msg := s.remoteCondition(c, st, now, rigs)
 			switch {
 			case raise && latches[c] != latchRaised:
-				s.notify.Raise(ctx, model.Alert{Severity: model.SeverityWarn, Category: c, Message: model.RemoteAlertPrefix(st.ID) + msg})
+				s.notify.Raise(ctx, model.Alert{Severity: model.SeverityWarn, Category: c, Message: model.RemoteAlertPrefix(st.ID) + msg, Standing: true})
 				latches[c] = latchRaised
 			case clear && latches[c] != latchClear:
 				if !stickyAlerts[c] {
-					s.ackRemoteAlerts(ctx, st.ID, c)
+					s.resolveRemoteAlerts(ctx, st.ID, c)
 				}
 				latches[c] = latchClear
 			}
@@ -197,50 +195,30 @@ func liveSession(rigs []model.RigStatus, id string) bool {
 	return slices.ContainsFunc(rigs, func(r model.RigStatus) bool { return r.Site == id && r.InSession })
 }
 
-// ackRemoteAlertsWindow is how many of the newest unacknowledged alerts are
-// searched for a remote's alert to acknowledge.
-const ackRemoteAlertsWindow = 500
-
-// ackRemoteAlerts acknowledges the remote's standing alerts of category c.
+// resolveRemoteAlerts resolves the remote's standing alerts of category c.
 //
 // A remote-level alert row has no rig id and no remote id (the alert store's
-// schema is unchanged by the remote bridge), so it is identified by category
-// and by its message starting with model.RemoteAlertPrefix, and only within the
-// newest ackRemoteAlertsWindow unacknowledged alerts. One buried deeper under
-// other unacknowledged alerts is never auto-acknowledged and stays until the
-// user acknowledges it; a remote id on the alert row would lift both limits.
-func (s *Supervisor) ackRemoteAlerts(ctx context.Context, id string, c model.Category) {
+// schema is unchanged by the remote bridge), so it is identified by category and
+// by its message starting with model.RemoteAlertPrefix.
+func (s *Supervisor) resolveRemoteAlerts(ctx context.Context, id string, c model.Category) {
 	if s.alerts == nil {
 		return
 	}
-	alerts, err := s.alerts.ListAlerts(ctx, false, ackRemoteAlertsWindow)
+	n, err := s.alerts.ResolveAlerts(ctx, "", c, model.RemoteAlertPrefix(id), s.now().Unix())
 	if err != nil {
-		s.log.Warn("remote: could not list alerts to auto-ack", "remote", id, "error", err)
+		s.log.Warn("remote: could not resolve cleared alerts", "remote", id, "category", string(c), "error", err)
 		return
 	}
-	prefix := model.RemoteAlertPrefix(id)
-	at := s.now().Unix()
-	acked := 0
-	for _, a := range alerts {
-		if a.RigID != "" || a.Category != c || !strings.HasPrefix(a.Message, prefix) {
-			continue
-		}
-		if err := s.alerts.AckAlert(ctx, a.ID, at); err != nil {
-			s.log.Warn("remote: auto-ack failed", "remote", id, "alert", a.ID, "error", err)
-			continue
-		}
-		acked++
-	}
-	if acked == 0 {
+	if n == 0 {
 		return
 	}
-	s.log.Info("remote: auto-acked resolved alerts", "remote", id, "category", string(c), "count", acked)
+	s.log.Info("remote: resolved cleared alerts", "remote", id, "category", string(c), "count", n)
 	if n, err := s.alerts.UnackedCount(ctx); err == nil && s.hub != nil {
 		s.hub.SetUnackedAlerts(n)
 	}
 }
 
-// repairedAlerts acknowledges the alerts a Re-pair settles: a leaked pairing
+// repairedAlerts resolves the alerts a Re-pair settles: a leaked pairing
 // is replaced, so its evidence no longer stands.
 func (s *Supervisor) repairedAlerts(id string) {
 	s.pubMu.Lock()
@@ -248,10 +226,10 @@ func (s *Supervisor) repairedAlerts(id string) {
 	if l := s.latches[id]; l != nil {
 		l[model.AlertRemoteForeignKey] = latchClear
 	}
-	s.ackRemoteAlerts(context.Background(), id, model.AlertRemoteForeignKey)
+	s.resolveRemoteAlerts(context.Background(), id, model.AlertRemoteForeignKey)
 }
 
-// forgetAlerts acknowledges every alert of a removed remote: whatever they
+// forgetAlerts resolves every alert of a removed remote: whatever they
 // reported no longer applies.
 func (s *Supervisor) forgetAlerts(id string) {
 	s.pubMu.Lock()
@@ -259,7 +237,7 @@ func (s *Supervisor) forgetAlerts(id string) {
 	delete(s.latches, id)
 	delete(s.lastState, id)
 	for _, c := range remoteAlertCategories {
-		s.ackRemoteAlerts(context.Background(), id, c)
+		s.resolveRemoteAlerts(context.Background(), id, c)
 	}
 }
 

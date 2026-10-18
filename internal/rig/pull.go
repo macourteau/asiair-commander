@@ -108,6 +108,7 @@ func (w *Worker) pullPhase(ctx context.Context, cfg *model.Config, cy cycle, dev
 				Severity: model.SeverityWarn,
 				Category: model.AlertIdentityUnconfirmed,
 				Message:  "can't confirm this rig's device identity (no scan_air reply); pulls are paused",
+				Standing: true,
 			})
 		}
 		return pullOutcome{refused: true}
@@ -116,7 +117,7 @@ func (w *Worker) pullPhase(ctx context.Context, cfg *model.Config, cy cycle, dev
 	// as the last-known-good device IP (the host-bound guid bind, if any, was
 	// already recorded inside confirmDeviceIdentity from that same probe).
 	w.noConfirmStreak = 0
-	w.ackAlerts(ctx, model.AlertIdentityUnconfirmed)
+	w.resolveAlerts(ctx, model.AlertIdentityUnconfirmed)
 	w.recordLastKnownIP(ctx, ep)
 
 	cl := w.perConnectClock(sess.ServerTime())
@@ -876,7 +877,7 @@ func (w *Worker) probeStaging(ctx context.Context, cfg *model.Config) {
 	w.log.Info("rig: staging area writable again; resuming pulls", "staging", cfg.Roots.Staging, "previous_error", w.destWriteErr)
 	w.destWriteErr = nil
 	w.st.LastError = ""
-	w.ackAlerts(ctx, model.AlertDestinationUnavailable)
+	w.resolveAlerts(ctx, model.AlertDestinationUnavailable)
 	w.publish()
 }
 

@@ -155,8 +155,8 @@ func (w *Worker) resetIdentity(ctx context.Context) {
 	// so a standing warning is stale. If any share couldn't be cleared, leave the
 	// alert standing.
 	if failed == 0 {
-		w.ackAlerts(ctx, model.AlertIdentityMismatch)
-		w.ackAlerts(ctx, model.AlertMediaChanged)
+		w.resolveAlerts(ctx, model.AlertIdentityMismatch)
+		w.resolveAlerts(ctx, model.AlertMediaChanged)
 	}
 }
 
@@ -183,45 +183,46 @@ func clearMarker(share device.Share, name string) error {
 	return nil
 }
 
-// ackAlerts acknowledges this rig's unacked alerts of the given category and
-// refreshes the hub's unacked count so the dashboard badge and Alerts view update.
-func (w *Worker) ackAlerts(ctx context.Context, category model.Category) {
-	w.ackAlertsScoped(ctx, category, w.profileID)
+// resolveAlerts records that this rig's condition of the given category cleared:
+// its standing alerts are resolved (and acknowledged, if the operator had not),
+// so the condition raises anew if it returns (design architecture §10), and the
+// hub's unacked count is refreshed so the dashboard badge and Alerts view update.
+func (w *Worker) resolveAlerts(ctx context.Context, category model.Category) {
+	w.resolveAlertsScoped(ctx, category, w.profileID)
 }
 
-// ackFleetAlerts acknowledges unacked FLEET-WIDE alerts of the given category —
-// those raised with an empty rig id, which the store maps to a NULL rig_id
-// (store.go nullStr) so one condition on a shared resource dedups to a single row
-// instead of one per rig. The destination-volume conditions are exactly that: the
-// NAS is fleet-wide, not per-rig. Without this, such an alert could never be
-// auto-acked (the rig-scoped matcher never matches an empty rig id) and would
-// stand forever after the condition cleared.
-func (w *Worker) ackFleetAlerts(ctx context.Context, category model.Category) {
-	w.ackAlertsScoped(ctx, category, "")
+// resolveFleetAlerts resolves FLEET-WIDE alerts of the given category — those
+// raised with an empty rig id, which the store maps to a NULL rig_id (store.go
+// nullStr) so one condition on a shared resource dedups to a single row instead
+// of one per rig. The destination-volume conditions are exactly that: the NAS is
+// fleet-wide, not per-rig. Without this, such an alert could never be resolved
+// (the rig-scoped matcher never matches an empty rig id) and would stand forever
+// after the condition cleared.
+func (w *Worker) resolveFleetAlerts(ctx context.Context, category model.Category) {
+	w.resolveAlertsScoped(ctx, category, "")
 }
 
-func (w *Worker) ackAlertsScoped(ctx context.Context, category model.Category, rigID string) {
-	alerts, err := w.store.ListAlerts(ctx, false, 500)
+// resolveAlertsByPrefix resolves this rig's standing alerts of the category whose
+// message starts with prefix, for a category that carries several conditions.
+func (w *Worker) resolveAlertsByPrefix(ctx context.Context, category model.Category, prefix string) {
+	w.resolveMatching(ctx, w.profileID, category, prefix)
+}
+
+func (w *Worker) resolveAlertsScoped(ctx context.Context, category model.Category, rigID string) {
+	w.resolveMatching(ctx, rigID, category, "")
+}
+
+func (w *Worker) resolveMatching(ctx context.Context, rigID string, category model.Category, prefix string) {
+	n, err := w.store.ResolveAlerts(ctx, rigID, category, prefix, w.now().Unix())
 	if err != nil {
-		w.log.Warn("rig: could not list alerts to auto-ack", "error", err)
+		w.log.Warn("rig: could not resolve cleared alerts", "category", category, "error", err)
 		return
 	}
-	now := w.now().Unix()
-	acked := 0
-	for _, a := range alerts {
-		if a.RigID == rigID && a.Category == category {
-			if err := w.store.AckAlert(ctx, a.ID, now); err != nil {
-				w.log.Warn("rig: auto-ack failed", "alert", a.ID, "error", err)
-				continue
-			}
-			acked++
+	if n > 0 {
+		if c, err := w.store.UnackedCount(ctx); err == nil {
+			w.hub.SetUnackedAlerts(c)
 		}
-	}
-	if acked > 0 {
-		if n, err := w.store.UnackedCount(ctx); err == nil {
-			w.hub.SetUnackedAlerts(n)
-		}
-		w.log.Info("rig: auto-acked resolved alerts", "category", category, "count", acked)
+		w.log.Info("rig: resolved cleared alerts", "category", category, "count", n)
 	}
 }
 

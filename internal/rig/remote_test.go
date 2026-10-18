@@ -356,7 +356,7 @@ func TestRemoteStalledProgressAlert(t *testing.T) {
 	}
 
 	// The next success acknowledges it.
-	id, err := h.store.RaiseAlert(context.Background(), model.Alert{
+	id, _, err := h.store.RaiseAlert(context.Background(), model.Alert{
 		RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertRemoteStalled, Message: a.Message, CreatedAt: h.nowVal.Unix(),
 	})
 	if err != nil {

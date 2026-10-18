@@ -283,7 +283,7 @@ re-evaluated per frame either: it is a few seconds old, and the reasoning above 
 | **Clear all missing marks / Re-check missing frames** | Redundant without a stored conclusion. Re-check duplicates the next scan pass; Clear's intents are covered by relink, Pause and `keep_originals`. See §2.3. |
 | **A restore give-up after a fixed number of days** | A standing restore request is already a standing hold, since the absent branch defers unconditionally on it, which is the outcome a give-up tries to reach, with no mechanism. Failures alert once per episode; the request stays until the operator cancels it (§4.4). |
 | **Per-pass directory caps and persisted cursors** | Make the settle window depend on library size, break the "survived every intervening pass" property §2.2 relies on, and add cursor-persistence defects. A streaming pass over a few thousand directories takes seconds to low minutes, once every six hours. |
-| **A durable `missing_hidden_at` column with an opt-in list filter** | Drags a hide predicate into `ListFrames`, whose never-deletable backlog count feeds the capacity alert; hidden rows dropping out of that count would auto-ack the backlog alert, including the `CAPTURE MAY STOP` critical, while those frames still occupy the card. Grouping by directory makes a large cull one heading. |
+| **A durable `missing_hidden_at` column with an opt-in list filter** | Drags a hide predicate into `ListFrames`, whose never-deletable backlog count feeds the capacity alert; hidden rows dropping out of that count would auto-ack the backlog alert, including the "capture may stop" critical, while those frames still occupy the card. Grouping by directory makes a large cull one heading. |
 | **Alert superseding per directory** | Unneeded: the message carries the count and the date, so a larger later event produces a different string and is not swallowed by alert dedup (§4.8). |
 | **A filesystem change-notification watcher** | Change-notify over SMB does not survive a reconnect and drops events on buffer overflow. Decisively, the operator usually culls while the service is not running. |
 | **A full recursive walk of a root** | Enumerates directories Commander does not own and re-derives paths the index already holds. |
@@ -429,7 +429,9 @@ intervening pass" argument true, at the cost §6.9 accepts.
    ticker guard or `workSuspended()`: run-now and an identity reset both enter the cycle on a
    paused rig, and pausing is the operator's response to a suspicious pass (I22).
 2. Count rows whose `dest_path` falls under no configured root (`CountOutsideRoots`) and, when
-   non-zero, raise an `AlertConfig` warn naming the count (I21). This belongs to the scan, not the
+   non-zero, raise a standing `AlertConfig` warn (I21); the count is logged, not put in the
+   message, which would make every change of count a new alert, and a scan that finds none
+   resolves it ([architecture §10](2026-10-17-architecture.md)). This belongs to the scan, not the
    delete pass, because the delete pass does not run for a `keep_originals`, offline or paused rig
    and returns early when nothing is eligible.
 3. Per root: evaluate `rootConfirmed`. A `not linked` root first gets an auto-link attempt from
@@ -721,8 +723,11 @@ alert already names that directory. The count is a per-pass delta, not a running
 
 The first-failure time for `library_unavailable` lives in meta under `rootunavail:<root key>`,
 keyed per root to match `libraryid:`: the first rig to cross the threshold raises, and any rig's
-successful confirmation clears the record. None of the three is auto-acknowledged, because acking by
-category would let one root recovering ack another root's live alert. `frame_lost` keeps its
+successful confirmation clears the record. `library_unavailable` and `library_mismatch` are standing
+alerts ([architecture §10](2026-10-17-architecture.md)): a root's successful confirmation resolves
+the confirming rig's alerts **for that root**, matched by the root in the message prefix, never by
+category, which would let one root recovering retire another root's live alert.
+`library_reconciled` is an event and is never auto-acknowledged. `frame_lost` keeps its
 meaning (no copy provably exists anywhere) and is raised at warn for a both-sides cull (§4.4). A
 repointed root's orphaned rows raise `config` at warn (§4.3).
 
@@ -1599,16 +1604,13 @@ taken; the residual above is accepted.
 
 ### 11.5 Keeping the never-deletable alert honest
 
-`countNeverDeletable` feeds the low-disk `CAPTURE MAY STOP … these frames are never removed`
-critical. It counts `held` and `failed` frames always, and `unclassified` frames only while **not**
-culled: a culled unclassified frame is on its way off the device, so it drops out of the count and
-the message, while a non-culled one is still never auto-removed until reclassified (I36). The
-filter runs in Go, over the rows `store.UnclassifiedFrames` returns, testing `MissingSeenAt`; the
-unclassified backlog is a small error-state set. If a rig ever accumulates a large one, the remedy
-is a dedicated `COUNT(*) WHERE state='unclassified' AND missing_seen_at IS NULL` store method in
-place of the in-Go filter (a store-interface change, so the integration fakes change with it). A
-culled frame under an unconfirmed root never
-actually drains yet is excluded too, matching how verified culls behave.
+`countNeverDeletable` feeds the backlog alert and its low-disk "capture may stop" critical. It
+counts `held` and `failed` frames always, and `unclassified` frames only while **not** culled: a
+culled unclassified frame is on its way off the device, so it drops out of the count and of the
+frames the alert links to, while a non-culled one is still never auto-removed until reclassified
+(I36). The predicate is one SQL clause in the store (`ListNeverDeletable`), shared by the count
+and by the History view the alert links to, so the two cannot disagree. A culled frame under an
+unconfirmed root never actually drains yet is excluded too, matching how verified culls behave.
 
 ### 11.6 Acceptance criteria
 
@@ -1629,7 +1631,7 @@ actually drains yet is excluded too, matching how verified culls behave.
    mint, SQL, UI); group Acknowledge on the quarantine directory acknowledges nothing; `held` and
    `deleted` are not acknowledgeable (tests, plus a manual UI check).
 8. **AC7.** A culled, armed `unclassified` frame does not count toward `countNeverDeletable` and is
-   absent from the `CAPTURE MAY STOP` message; a non-culled one still counts.
+   absent from the frames the backlog alert links to; a non-culled one still counts.
 9. **AC8.** The drain needs no schema migration and no `CurrentStoreSchemaVersion` of its own.
 10. **AC9.** Manual, on real hardware: an operator with stranded culled frames sees them per-frame
     acknowledgeable, and after Acknowledge or after the settle window the device originals leave

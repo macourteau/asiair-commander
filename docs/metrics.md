@@ -55,7 +55,7 @@ stop appearing. A removed remote likewise has every `remote`-labelled series rem
 | `pull_phase_refused_total` | counter | `rig`, `reason` | Pull passes refused — which also **skips the delete pass**, so a rig can silently stop draining. |
 | `listing_entries` | gauge | `rig`, `share` | Entries returned by the last **completed** listing pass for a share. |
 | `listing_timestamp_seconds` | gauge | `rig`, `share` | Unix time of that listing. Pairs with `listing_entries`: a frozen count with an old timestamp is stale (a failed pass leaves both untouched), the visible signature of a silently truncated listing. |
-| `alerts_raised_total` | counter | `category`, `severity` | Persisted alert-raise attempts. |
+| `alerts_raised_total` | counter | `category`, `severity` | Alert rows created: one per new alert, not one per raise of an alert already standing. |
 
 ### Enum values
 
@@ -164,11 +164,13 @@ one labelled counter. Any nonzero rate means the application is shedding work.
 
 These are correct-by-design and will otherwise be misread:
 
-- **`alerts_raised_total` counts persisted raise *attempts*, not distinct alerts.** The
-  store deduplicates identical unacked `(rig, category, message)` tuples, and that dedup
-  is **not severity-aware**, so the same tuple raised at a different severity collapses
-  onto the first row's severity. This counter will legitimately disagree with the alerts
-  table.
+- **`alerts_raised_total` counts alert rows created, not raise calls.** Most conditions are
+  re-raised every cycle while they hold; the store absorbs a raise into the row that still
+  stands (an unacknowledged event, or a standing condition until it is resolved, even after
+  it is acknowledged — design architecture §10), and only a created row counts. The dedup is
+  **not severity-aware**: the same `(rig, category, message)` raised at a different severity
+  lands on the first row and counts nothing, so the counter's `severity` split can disagree
+  with a later severity the condition was raised at.
 - **`frames_deleted_total{manner="source_vanished"}` issued no delete** — it records a
   row closed out because the source was already gone.
 - **`transfer_bytes_wasted_total`** is bytes paid for over SMB and then thrown away, a

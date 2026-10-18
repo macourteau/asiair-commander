@@ -30,7 +30,7 @@ type Notifier interface {
 // automatically) lets tests use a tiny hand-rolled fake instead of a full
 // store.Store implementation.
 type alertStore interface {
-	RaiseAlert(ctx context.Context, a model.Alert) (int64, error)
+	RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, error)
 	UnackedCount(ctx context.Context) (int, error)
 }
 
@@ -53,23 +53,29 @@ func New(s store.Store, h hub.Hub, mx *metrics.Metrics, logger *slog.Logger) Not
 	return &notifier{store: s, hub: h, metrics: mx, log: logger}
 }
 
-// Raise persists a, emits an "alert.raised" event carrying it, and refreshes
-// the hub's unacked-alert count. Store.RaiseAlert already de-duplicates
-// identical unacked alerts, so rapid repeats collapse to one row.
+// Raise persists a and, only when that created a new alert row, emits an
+// "alert.raised" event carrying it, records the metric, logs it and refreshes the
+// hub's unacked-alert count. A raise absorbed by a row that still stands
+// (Store.RaiseAlert) is the same alert seen again, not news: conditions are
+// re-raised every cycle, and announcing each would toast and read the same alert
+// to screen readers every few seconds (design architecture §10).
 func (n *notifier) Raise(ctx context.Context, a model.Alert) {
 	if a.CreatedAt == 0 {
 		a.CreatedAt = time.Now().Unix()
 	}
 
-	id, err := n.store.RaiseAlert(ctx, a)
+	id, created, err := n.store.RaiseAlert(ctx, a)
 	if err != nil {
 		n.log.Error("notify: raise alert failed", "rig_id", a.RigID, "category", a.Category, "error", err)
 		return
 	}
 	a.ID = id
-	// Counts persisted raise attempts (the store deduplicates identical unacked
-	// tuples, and that dedup is not severity-aware), so this legitimately disagrees
-	// with the alerts table — see docs/metrics.md.
+	if !created {
+		n.log.Debug("notify: alert already standing", "id", id, "rig_id", a.RigID, "category", a.Category, "standing", a.Standing)
+		return
+	}
+	// Counts alert rows created, so it agrees with the alerts table except for the
+	// dedup not being severity-aware — see docs/metrics.md.
 	n.metrics.RecordAlertRaised(a.Category, a.Severity)
 
 	n.hub.Emit(hub.Event{Name: "alert.raised", Data: a})
