@@ -57,7 +57,12 @@ func TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears(t *testing.T) {
 	}
 	// The message says what clears each kind, matching what the History view the
 	// alert links to offers: no promise of an action that does not exist.
-	for _, want := range []string{"reclassify or dismiss", "until a retry succeeds", "confirm their NAS copy"} {
+	// A held frame is never re-checked while its device file is unchanged (design
+	// frame-lifecycle §4), so the message must not promise that Commander clears it.
+	if strings.Contains(rows[0].Message, "Commander can confirm") {
+		t.Errorf("backlog message %q promises an automatic re-check of held frames", rows[0].Message)
+	}
+	for _, want := range []string{"reclassify or dismiss", "until a retry succeeds", "held frames until you resolve them"} {
 		if !strings.Contains(rows[0].Message, want) {
 			t.Errorf("backlog message %q lacks %q", rows[0].Message, want)
 		}

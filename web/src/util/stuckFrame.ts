@@ -22,6 +22,15 @@ export interface StuckFrameHelp {
   canDismiss: boolean;
 }
 
+/**
+ * The accessible name of a row's "Why it stays" button. It starts with the
+ * visible text so speech input ("click Why it stays") matches it, then names
+ * the frame and rig so each row's button is distinct.
+ */
+export function whyItStaysLabel(file: string, rig: string): string {
+  return `Why it stays: ${file} on ${rig}`;
+}
+
 /** The help for a never-deletable frame, or null for a frame in any other state. */
 export function stuckFrameHelp(
   frame: Pick<Frame, "state" | "next_retry_at" | "missing_seen_at">,
@@ -36,8 +45,10 @@ export function stuckFrameHelp(
           "match. The file may have changed on the device, or one of the copies may be damaged, so " +
           "Commander keeps both and won't remove the device file.",
         next:
-          "There is nothing to dismiss: the device file may be the only good copy. The frame leaves this " +
-          "list on its own once a later check confirms the NAS copy.",
+          "There is nothing to dismiss: the device file may be the only good copy. Commander doesn't " +
+          "re-check it on its own; if the file on the device changes, Commander copies it again and the " +
+          "frame leaves this list. If you have compared the two copies and are sure the NAS copy is good, " +
+          "you can delete the device file yourself from the File browser.",
         canDismiss: false,
       };
     case "failed": {
