@@ -6,8 +6,9 @@
  */
 import { useState } from "react";
 import { NavLink } from "react-router";
-import { Badge, Button, Icon, IconButton, Toggle, useTheme, useToast, type IconName } from "@/design";
+import { Badge, Button, Icon, IconButton, useTheme, useToast, type IconName } from "@/design";
 import { api, ApiError, useConnState, useServerInfo, useSnapshot } from "@/api";
+import { themeSwitchView } from "../util/themeSwitch";
 import { newerRelease, RELEASES_URL } from "../util/version";
 
 interface NavItem {
@@ -47,6 +48,7 @@ const CONN_LABEL = {
 
 export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavProps) {
   const { theme, toggleTheme } = useTheme();
+  const themeView = themeSwitchView(theme);
   const conn = useConnState();
 
   return (
@@ -112,14 +114,15 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
       </div>
 
       <div className="shell-nav__footer">
-        <div className="shell-nav__row">
-          <Toggle
-            checked={theme === "light"}
-            onChange={toggleTheme}
-            label={theme === "light" ? "Light theme" : "Dark theme"}
-          />
-          <Icon name={theme === "light" ? "sun" : "moon"} size={18} aria-hidden />
-        </div>
+        <Button
+          variant="ghost"
+          block
+          className="shell-nav__theme"
+          icon={<Icon name={themeView.icon} size={18} />}
+          onClick={toggleTheme}
+        >
+          {themeView.label}
+        </Button>
         <div className="shell-nav__row">
           <span className="text-muted text-sm">Signed in</span>
           <IconButton label="Sign out" icon={<Icon name="logout" />} onClick={onLogout} />
