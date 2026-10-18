@@ -60,9 +60,12 @@ func (s Size) maxDim() int {
 
 // ParseSize maps a size name to a Size; ok=false for anything else.
 func ParseSize(s string) (Size, bool) {
-	switch Size(s) {
-	case SizeThumb, SizeCard, SizeScreen, SizeFull:
-		return Size(s), true
+	// Return the matching constant, never Size(s): the size names a cache file, so
+	// what reaches the filesystem is always one of these literals, not request text.
+	for _, size := range []Size{SizeThumb, SizeCard, SizeScreen, SizeFull} {
+		if s == string(size) {
+			return size, true
+		}
 	}
 	return "", false
 }
