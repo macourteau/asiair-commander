@@ -25,7 +25,8 @@
     color var(--dur-fast) var(--ease);
   user-select: none;
 }
-.aac-btn:disabled {
+.aac-btn:disabled,
+.aac-btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -33,7 +34,7 @@
   background: var(--accent);
   color: var(--on-accent);
 }
-.aac-btn--primary:not(:disabled):hover {
+.aac-btn--primary:not(:disabled):not([aria-disabled="true"]):hover {
   background: var(--accent-hover);
 }
 .aac-btn--secondary {
@@ -41,7 +42,7 @@
   color: var(--text);
   border-color: var(--border-strong);
 }
-.aac-btn--secondary:not(:disabled):hover {
+.aac-btn--secondary:not(:disabled):not([aria-disabled="true"]):hover {
   background: color-mix(in srgb, var(--surface-2) 80%, var(--text) 6%);
   border-color: var(--accent);
 }
@@ -49,7 +50,7 @@
   background: transparent;
   color: var(--text);
 }
-.aac-btn--ghost:not(:disabled):hover {
+.aac-btn--ghost:not(:disabled):not([aria-disabled="true"]):hover {
   background: var(--surface-2);
 }
 .aac-btn--danger {
@@ -57,7 +58,7 @@
   color: var(--problem-fg);
   border-color: var(--problem-border);
 }
-.aac-btn--danger:not(:disabled):hover {
+.aac-btn--danger:not(:disabled):not([aria-disabled="true"]):hover {
   background: var(--problem-tint);
 }
 .aac-btn--sm {

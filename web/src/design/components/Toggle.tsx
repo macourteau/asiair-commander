@@ -4,6 +4,14 @@
  * position AND the label, not color alone.
  *
  *   <Toggle checked={managed} onChange={setManaged} label="Managed rig" />
+ *
+ * Inside a <Field>, spread the field's wiring and mark the label as state text:
+ * the field label then names the switch, and the "On"/"Off" text stays visual
+ * (role="switch" already announces the state).
+ *
+ *   <Field label="Strip spaces">
+ *     {(f) => <Toggle {...f} stateLabel checked={on} onChange={setOn} label={on ? "On" : "Off"} />}
+ *   </Field>
  */
 import { useId } from "react";
 
@@ -12,8 +20,11 @@ export interface ToggleProps {
   onChange: (checked: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** The label only restates the switch's state; an outer label names it. */
+  stateLabel?: boolean;
   /** Extra description id(s) wired via aria-describedby (e.g. a Field help line). */
   "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
   id?: string;
 }
 
@@ -22,6 +33,7 @@ export function Toggle({
   onChange,
   label,
   disabled = false,
+  stateLabel = false,
   id,
   ...aria
 }: ToggleProps) {
@@ -37,11 +49,14 @@ export function Toggle({
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         aria-describedby={aria["aria-describedby"]}
+        aria-invalid={aria["aria-invalid"]}
       />
       <span className="aac-toggle__track" aria-hidden="true">
         <span className="aac-toggle__thumb" />
       </span>
-      <span className="aac-toggle__label">{label}</span>
+      <span className="aac-toggle__label" aria-hidden={stateLabel || undefined}>
+        {label}
+      </span>
     </label>
   );
 }

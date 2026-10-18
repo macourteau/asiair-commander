@@ -172,6 +172,12 @@
 .shell-main {
   min-width: 0;
 }
+/* A navigation moves focus to the page heading (or <main>) only so a screen
+   reader announces the new page; neither is operable, so no focus ring. */
+.shell-main:focus,
+.shell-content h1:focus {
+  outline: none;
+}
 .shell-content {
   max-width: var(--content-max);
   margin: 0 auto;
@@ -248,11 +254,18 @@
     inset: var(--topbar-height) auto 0 0;
     z-index: var(--z-nav);
     transform: translateX(-100%);
-    transition: transform var(--dur-base) var(--ease);
+    /* Hidden once it has slid out, so the closed drawer leaves the tab order
+       and the accessibility tree; visibility flips only after the slide. */
+    visibility: hidden;
+    transition:
+      transform var(--dur-base) var(--ease),
+      visibility 0s linear var(--dur-base);
     box-shadow: var(--shadow-overlay);
   }
   .shell-nav--open {
     transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--dur-base) var(--ease);
   }
   /* The top bar already shows the mark and name; the drawer keeps only the
      version line and the newer-release link. */

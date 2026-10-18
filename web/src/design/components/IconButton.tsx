@@ -5,7 +5,7 @@
  *
  *   <IconButton label="Dismiss" icon={<Icon name="close" />} onClick={close} />
  */
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 export interface IconButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> {
@@ -13,6 +13,7 @@ export interface IconButtonProps
   label: string;
   icon: ReactNode;
   active?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function IconButton({
