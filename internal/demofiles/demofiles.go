@@ -32,6 +32,13 @@ type File struct {
 	Mtime time.Time
 }
 
+// Content is the file's bytes: Size zeros. The demo build puts exactly these on
+// the fake device and seeddemo writes them as the held frame's NAS copy, so the
+// device, archive and recorded hashes agree.
+func (f File) Content() []byte {
+	return make([]byte, f.Size)
+}
+
 // base is a fixed night, so a store row and its device file agree on mtime
 // across separate seeder and server runs.
 var base = time.Date(2026, 10, 7, 23, 15, 2, 0, time.UTC)

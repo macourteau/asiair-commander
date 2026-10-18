@@ -39,6 +39,10 @@ the contract between this seeder and the demo build:
   unclassified ones (`DeletionEligible`, `internal/store/store.go`), so the file stays on the
   device and the delete dialog counts it as 1 unarchived file on every run. The held rows
   also raise the rig cards' never-deletable backlog alert, which is expected here.
+- The seeder also writes the frame's NAS copy at the rows' `light/M42/<name>.fit`: the same
+  zeros the demo build stages on the device (`demofiles.File.Content`), hashed into the rows'
+  device and archive hashes. Without it the library scan would mark the row missing and raise
+  "Library reconciled" on its first pass over a linked root.
 
 A demo build with a remote scenario (`tools/seedremote`) stages none of these files.
 
