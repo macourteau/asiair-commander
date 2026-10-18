@@ -468,8 +468,9 @@ frame is retried next cycle.
 
 **Stalled progress.** A remote rig with three consecutive passes (`stallPasses`; about two minutes
 at the shipped 45 s poll) in which its remote's tunnel was up and a pull or delete attempt failed
-raises one Warn `remote_stalled` alert naming its remote, auto-acknowledged on the next success,
-and its blocked deletes are counted. A delete waiting for an ordinary reason (the settle window, a
+raises one standing Warn `remote_stalled` alert naming its remote, resolved by the next success.
+Its blocked deletes are counted in the log, not the message, which must stay the same across
+episodes of one stall ([architecture §10](2026-10-17-architecture.md)). A delete waiting for an ordinary reason (the settle window, a
 supersede in flight, unclassified, `source_changed_deferred`) never counts, so the alert never
 fires while the remote is Reconnecting, Unreachable or Waiting. It covers a pre-delete *hash* that
 keeps failing, which the transient-error branch alone would only log, and a link that flaps faster
@@ -927,7 +928,8 @@ against the Samba NT1 container through a real tailcat tunnel with a local DERP 
 27. Each of the stalled-progress, another-remote-using-this-pairing, rejected-foreign-key and
     stale-build Warn alerts fires on its condition and auto-acknowledges when the condition clears,
     except the rejected-foreign-key alert, which clears only on Re-pair or manual acknowledgement —
-    `TestRemoteStalledProgressAlert`, `TestPairingReuseAlert`, `TestRejectedForeignKeyAlert`,
+    `TestRemoteStalledProgressAlert`, `TestRemoteStalledAlertMessageIsStableAcrossEpisodes`,
+    `TestPairingReuseAlert`, `TestRejectedForeignKeyAlert`,
     `TestStaleBuildAlert` (§8, §10).
 
 ## 14. Rejected alternatives

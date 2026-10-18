@@ -1546,7 +1546,7 @@ func TestNoReplyStreakDegradesThenAutoAcks(t *testing.T) {
 	}
 
 	// A standing degraded alert is auto-acked once identity is confirmed again.
-	id, err := h.store.RaiseAlert(ctx, model.Alert{
+	id, _, err := h.store.RaiseAlert(ctx, model.Alert{
 		RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertIdentityUnconfirmed,
 		Message: "unconfirmed", CreatedAt: h.nowVal.Unix(),
 	})
@@ -2175,7 +2175,7 @@ func TestFleetWideAlertsAutoAckOnRecovery(t *testing.T) {
 
 	// Both conditions stood at some earlier point, raised fleet-wide.
 	for _, cat := range []model.Category{model.AlertNASDiskLow, model.AlertDestinationUnavailable} {
-		if _, err := h.store.RaiseAlert(ctx, model.Alert{
+		if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 			Severity:  model.SeverityWarn,
 			Category:  cat,
 			Message:   "stale " + string(cat),
@@ -2205,7 +2205,7 @@ func TestNASDiskLowStaysWhileSpaceIsLow(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 
-	if _, err := h.store.RaiseAlert(ctx, model.Alert{
+	if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 		Severity:  model.SeverityWarn,
 		Category:  model.AlertNASDiskLow,
 		Message:   "NAS destination free space is below the reserve; pulls will pause",
@@ -2271,7 +2271,7 @@ func TestDeviceDiskLowAutoAcksOnRecovery(t *testing.T) {
 	if !h.hasAlert(model.AlertDeviceDiskLow) {
 		t.Fatalf("a tight share should raise device-disk-low; got %v", h.raisedCategories())
 	}
-	if _, err := h.store.RaiseAlert(ctx, model.Alert{
+	if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 		RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertDeviceDiskLow,
 		Message: "device free space is low", CreatedAt: h.nowVal.Unix(),
 	}); err != nil {
@@ -2305,7 +2305,7 @@ func TestStaleAlertFromPreviousProcessAutoAcks(t *testing.T) {
 
 	// The previous process left these behind; this worker never raised them.
 	for _, cat := range []model.Category{model.AlertDeviceDiskLow, model.AlertBacklog} {
-		if _, err := h.store.RaiseAlert(ctx, model.Alert{
+		if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 			RigID: "rig-01", Severity: model.SeverityWarn, Category: cat,
 			Message: "stale " + string(cat), CreatedAt: h.nowVal.Unix(),
 		}); err != nil {

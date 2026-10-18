@@ -203,6 +203,9 @@ const SURFACES = [
   },
   { name: "logs", path: "/logs", ready: "h1, main" },
   { name: "alerts", path: "/alerts", ready: "h1, main" },
+  // The backlog alert's link: History narrowed to one rig's never-deletable
+  // frames (the held frame tools/seeddemo stages per rig).
+  { name: "history-never-deletable", path: "/history?rig=rig-fra&view=never_deletable", ready: "h1, main" },
 ];
 
 /**

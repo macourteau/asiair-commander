@@ -172,10 +172,16 @@ func (s *Server) handleRecentFrames(w http.ResponseWriter, r *http.Request, id s
 	})
 }
 
+// historyViewNeverDeletable is the ?view= of the transfer history that lists a
+// rig's never-deletable frames (store ListNeverDeletable) instead of its
+// transfers.
+const historyViewNeverDeletable = "never_deletable"
+
 // handleTransferHistory serves the combined, non-rig-scoped transfer history: every
 // frame actually pulled to the NAS, newest-first, paginated and filterable by rig
 // and/or a pulled_at window (design architecture §8: bulk history always comes
-// from paginated REST). page is 1-indexed in the API and 0-indexed in the store;
+// from paginated REST). ?view=never_deletable lists the frames behind the backlog
+// alert instead (design architecture §10). page is 1-indexed in the API and 0-indexed in the store;
 // page_size defaults to framesPageSize and is clamped to historyMaxPageSize.
 func (s *Server) handleTransferHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -194,7 +200,21 @@ func (s *Server) handleTransferHistory(w http.ResponseWriter, r *http.Request) {
 		pageSize = historyMaxPageSize
 	}
 
-	rows, total, err := s.deps.Store.ListTransferHistory(r.Context(), rig, from, to, page-1, pageSize)
+	var rows []model.Frame
+	var total int
+	var err error
+	switch view := q.Get("view"); view {
+	case "":
+		rows, total, err = s.deps.Store.ListTransferHistory(r.Context(), rig, from, to, page-1, pageSize)
+	case historyViewNeverDeletable:
+		// The frames behind the backlog alert, which links here. They are a state,
+		// not a transfer window, so from/to do not apply (a failed frame was never
+		// pulled at all).
+		rows, total, err = s.deps.Store.ListNeverDeletable(r.Context(), rig, page-1, pageSize)
+	default:
+		writeError(w, http.StatusBadRequest, "unknown history view "+strconv.Quote(view))
+		return
+	}
 	if err != nil {
 		s.log.Error("web: transfer history failed", "rig", rig, "err", err)
 		writeError(w, http.StatusInternalServerError, "could not list transfer history")

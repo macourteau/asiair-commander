@@ -9,8 +9,13 @@
  * refresh is suppressed — pulling rows out from under a reader is worse than a
  * slightly stale page — and a subtle banner offers a jump back to the live first
  * page; the next filter/page interaction refetches anyway.
+ *
+ * The device filter and the never-deletable view live in the URL (`?rig=` and
+ * `?view=never_deletable`), so the backlog alert can link to exactly the frames
+ * it is about (design architecture §10).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import {
   api,
   ApiError,
@@ -36,6 +41,7 @@ import { FrameThumb } from "./FrameThumb";
 import { FrameLightbox } from "./FrameLightbox";
 import { CoordsCell, RotationCell } from "./AstrometryCells";
 import { absoluteTime, basename, formatBytes, relativeTime } from "../util/format";
+import { NEVER_DELETABLE_VIEW } from "../util/alerts";
 import "./surfaces.css";
 
 const PAGE_SIZE = 50;
@@ -54,7 +60,24 @@ function dayEnd(value: string): number | undefined {
 
 export function History() {
   const [rigs, setRigs] = useState<RigProfile[]>([]);
-  const [rig, setRig] = useState("");
+  const [params, setParams] = useSearchParams();
+  const rig = params.get("rig") ?? "";
+  const neverDeletable = params.get("view") === NEVER_DELETABLE_VIEW;
+  // replace, not push: a filter change is not a page the Back button should step through.
+  const setParam = useCallback(
+    (key: string, value: string) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set(key, value);
+          else next.delete(key);
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
+  const setRig = useCallback((v: string) => setParam("rig", v), [setParam]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
@@ -97,13 +120,15 @@ export function History() {
       setError(null);
       try {
         const res = await api.listTransferHistory(
-          {
-            rig: rig || undefined,
-            from: dayStart(from),
-            to: dayEnd(to),
-            page,
-            page_size: PAGE_SIZE,
-          },
+          neverDeletable
+            ? { rig: rig || undefined, view: NEVER_DELETABLE_VIEW, page, page_size: PAGE_SIZE }
+            : {
+                rig: rig || undefined,
+                from: dayStart(from),
+                to: dayEnd(to),
+                page,
+                page_size: PAGE_SIZE,
+              },
           signal,
         );
         if (signal.aborted) return;
@@ -116,7 +141,7 @@ export function History() {
         setFrames([]);
       }
     },
-    [rig, from, to, page],
+    [rig, neverDeletable, from, to, page],
   );
 
   // A single in-flight request at a time: issuing a new load aborts the previous
@@ -250,31 +275,57 @@ export function History() {
           />
         </div>
 
-        <label className="text-sm text-muted" htmlFor="history-from">
-          From
-        </label>
-        <input
-          id="history-from"
-          type="date"
-          className="aac-input"
-          style={{ maxWidth: 170 }}
-          value={from}
-          max={to || undefined}
-          onChange={(e) => onFilter(setFrom)(e.target.value)}
-        />
-        <label className="text-sm text-muted" htmlFor="history-to">
-          To
-        </label>
-        <input
-          id="history-to"
-          type="date"
-          className="aac-input"
-          style={{ maxWidth: 170 }}
-          value={to}
-          min={from || undefined}
-          onChange={(e) => onFilter(setTo)(e.target.value)}
-        />
+        {/* The never-deletable view is a state, not a transfer window (a failed
+            frame was never pulled), so the dates do not apply to it. */}
+        {!neverDeletable && (
+          <>
+            <label className="text-sm text-muted" htmlFor="history-from">
+              From
+            </label>
+            <input
+              id="history-from"
+              type="date"
+              className="aac-input"
+              style={{ maxWidth: 170 }}
+              value={from}
+              max={to || undefined}
+              onChange={(e) => onFilter(setFrom)(e.target.value)}
+            />
+            <label className="text-sm text-muted" htmlFor="history-to">
+              To
+            </label>
+            <input
+              id="history-to"
+              type="date"
+              className="aac-input"
+              style={{ maxWidth: 170 }}
+              value={to}
+              min={from || undefined}
+              onChange={(e) => onFilter(setTo)(e.target.value)}
+            />
+          </>
+        )}
       </div>
+
+      {neverDeletable && (
+        <div className="notice tone-info" role="status" style={{ marginBottom: "var(--space-3)" }}>
+          <Icon name="info" size={18} />
+          <span className="grow">
+            Showing only frames{rig ? ` on ${rigName(rig)}` : ""} that can't be removed from the
+            device automatically: unclassified, held or failed.
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setParam("view", "");
+              setPage(1);
+            }}
+          >
+            Show all transfers
+          </Button>
+        </div>
+      )}
 
       {pending && page !== 1 && (
         <div className="notice tone-info" role="status" style={{ marginBottom: "var(--space-3)" }}>
@@ -300,16 +351,24 @@ export function History() {
       ) : (
         <>
           <Table
-            caption="Transfer history"
+            caption={neverDeletable ? "Frames that can't be removed automatically" : "Transfer history"}
             columns={columns}
             rows={frames}
             getKey={(f) => f.id}
             empty={
-              <EmptyState
-                icon="nas"
-                title="No transfers match these filters"
-                description="Widen the date range or choose a different device to see more."
-              />
+              neverDeletable ? (
+                <EmptyState
+                  icon="safe"
+                  title="Nothing is stuck on the device"
+                  description="Every frame here can be removed from the device once it is safe on the NAS."
+                />
+              ) : (
+                <EmptyState
+                  icon="nas"
+                  title="No transfers match these filters"
+                  description="Widen the date range or choose a different device to see more."
+                />
+              )
             }
           />
 

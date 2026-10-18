@@ -246,7 +246,7 @@ func (w *Worker) trackStall(ctx context.Context, cy cycle, progressed, pullFaile
 		}
 		w.stallPasses, w.stallBlocked = 0, 0
 		if w.stallRaised {
-			w.ackAlerts(ctx, model.AlertRemoteStalled)
+			w.resolveAlerts(ctx, model.AlertRemoteStalled)
 			w.stallRaised = false
 		}
 		return
@@ -267,12 +267,18 @@ func (w *Worker) trackStall(ctx context.Context, cy cycle, progressed, pullFaile
 	if w.stallPasses != stallPasses {
 		return
 	}
+	// The blocked-delete count is logged, not put in the standing message: it
+	// differs between episodes of the same stall, and would make each a new alert
+	// past an acknowledgement (design architecture §10).
+	w.log.Warn("rig: no progress through the remote; raising remote_stalled",
+		"failed_passes", w.stallPasses, "deletes_blocked", w.stallBlocked)
 	w.notify.Raise(ctx, model.Alert{
 		RigID:    w.profileID,
 		Severity: model.SeverityWarn,
 		Category: model.AlertRemoteStalled,
-		Message: fmt.Sprintf("rig %q is making no progress through remote %q: %d passes in a row failed while its tunnel was up, %d delete attempts blocked",
-			cy.profile.Name, w.st.RemoteName, w.stallPasses, w.stallBlocked),
+		Message: fmt.Sprintf("rig %q is making no progress through remote %q: %d passes in a row failed while its tunnel was up "+
+			"(the log counts the deletes it blocked)", cy.profile.Name, w.st.RemoteName, stallPasses),
+		Standing: true,
 	})
 	w.stallRaised = true
 }

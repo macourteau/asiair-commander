@@ -178,4 +178,4 @@ type Frame struct {
 // config schema): the two schemas evolve independently, so welding them to one
 // constant would force a store-only migration to spuriously bump the config
 // schema (and vice versa), breaking the other's load guard.
-const CurrentStoreSchemaVersion = 10
+const CurrentStoreSchemaVersion = 11

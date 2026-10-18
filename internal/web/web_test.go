@@ -903,13 +903,26 @@ func TestTransferHistory(t *testing.T) {
 	if len(pg2.Frames) != 1 {
 		t.Errorf("page 2 len = %d, want 1", len(pg2.Frames))
 	}
+
+	// The backlog alert's view: the rig's never-deletable frames, pulled or not;
+	// the date window does not apply to it.
+	var nd page
+	decode(t, h.do("GET", "/api/frames?rig=rig-1&view=never_deletable&from=5000", nil, reqOpts{}), &nd)
+	if nd.Total != 1 || len(nd.Frames) != 1 || nd.Frames[0].SourcePath != "Autorun/never.fit" {
+		t.Errorf("never_deletable view = %+v, want just the failed frame", nd)
+	}
+	resp = h.do("GET", "/api/frames?view=bogus", nil, reqOpts{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown view: want 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 func TestAlertsAck(t *testing.T) {
 	h := newHarness(t, true)
 	h.login()
 
-	id, err := h.store.RaiseAlert(context.Background(), model.Alert{
+	id, _, err := h.store.RaiseAlert(context.Background(), model.Alert{
 		RigID: "rig-1", Severity: model.SeverityWarn, Category: model.AlertUnclassified,
 		Message: "an unclassified frame", CreatedAt: time.Now().Unix(),
 	})

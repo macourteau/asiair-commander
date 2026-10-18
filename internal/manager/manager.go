@@ -96,6 +96,11 @@ type Manager struct {
 	cancel       context.CancelFunc
 	started      bool
 	globalPaused bool
+	// nasFreeClear records that the destination free-space read succeeded since its
+	// alert was last resolved, so a healthy NAS resolves once, not every tick. It
+	// starts false so the first good read retires an alert a previous process left.
+	// Owned by maintenanceLoop.
+	nasFreeClear bool
 	pausedRigs   map[string]bool // individually-paused rigs (in addition to global)
 	wg           sync.WaitGroup
 }
@@ -733,16 +738,45 @@ func (m *Manager) publishNASFree() {
 	if err != nil {
 		m.log.Warn("manager: NAS free-space read failed", "root", cfg.Roots.Light, "error", err)
 		// Surface it — otherwise the dashboard just shows "0 B free" with no clue
-		// why, and pulls abort silently. Dedup keeps this from repeating each tick.
+		// why, and pulls abort silently. Standing, so the store keeps this to one
+		// alert per condition across ticks and an acknowledgement holds until a
+		// read succeeds (design architecture §10).
 		m.notify.Raise(m.baseCtx, model.Alert{
 			Severity: model.SeverityWarn,
 			Category: model.AlertConfig,
-			Message: fmt.Sprintf("Can't read free space for the destination folder %q: %v — does the folder exist and is the drive attached?",
+			Message: fmt.Sprintf(nasFreeAlertPrefix+"%q: %v — does the folder exist and is the drive attached?",
 				cfg.Roots.Light, err),
+			Standing: true,
 		})
+		m.nasFreeClear = false
 		return
 	}
 	m.hub.SetNASFree(free)
+	if !m.nasFreeClear {
+		m.resolveNASFreeAlert()
+		m.nasFreeClear = true
+	}
+}
+
+// nasFreeAlertPrefix starts the free-space-read alert's message, which is how it
+// is found among the fleet-wide config alerts to resolve it.
+const nasFreeAlertPrefix = "Can't read free space for the destination folder "
+
+// resolveNASFreeAlert resolves a standing free-space-read alert once a read
+// succeeds, and refreshes the badge.
+func (m *Manager) resolveNASFreeAlert() {
+	n, err := m.store.ResolveAlerts(m.baseCtx, "", model.AlertConfig, nasFreeAlertPrefix, time.Now().Unix())
+	if err != nil {
+		m.log.Warn("manager: could not resolve the NAS free-space alert", "error", err)
+		return
+	}
+	if n == 0 {
+		return
+	}
+	m.log.Info("manager: NAS free-space read recovered; resolved its alert", "count", n)
+	if c, err := m.store.UnackedCount(m.baseCtx); err == nil {
+		m.hub.SetUnackedAlerts(c)
+	}
 }
 
 // publishBytesLast12h sums the bytes copied to the NAS across the fleet in the

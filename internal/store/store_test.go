@@ -714,12 +714,12 @@ func TestAlertsRaiseAckUnacked(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
-	id1, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 100})
+	id1, _, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 100})
 	if err != nil {
 		t.Fatalf("RaiseAlert: %v", err)
 	}
 	// Identical unacked alert is de-duplicated → same id, no new row.
-	id2, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 200})
+	id2, _, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 200})
 	if err != nil {
 		t.Fatalf("RaiseAlert dup: %v", err)
 	}
@@ -727,11 +727,11 @@ func TestAlertsRaiseAckUnacked(t *testing.T) {
 		t.Errorf("expected dedup to reuse id %d, got %d", id1, id2)
 	}
 	// A different message is a distinct alert.
-	if _, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityCritical, Category: model.AlertNASDiskLow, Message: "disk low", CreatedAt: 300}); err != nil {
+	if _, _, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityCritical, Category: model.AlertNASDiskLow, Message: "disk low", CreatedAt: 300}); err != nil {
 		t.Fatal(err)
 	}
 	// A fleet-wide alert (empty rig id → NULL).
-	if _, err := s.RaiseAlert(ctx, model.Alert{Severity: model.SeverityInfo, Category: model.AlertConfig, Message: "cfg", CreatedAt: 400}); err != nil {
+	if _, _, err := s.RaiseAlert(ctx, model.Alert{Severity: model.SeverityInfo, Category: model.AlertConfig, Message: "cfg", CreatedAt: 400}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -766,7 +766,7 @@ func TestAlertsRaiseAckUnacked(t *testing.T) {
 		t.Errorf("ListAlerts(includeAcked) len = %d, want 3", len(all))
 	}
 	// After acking, the same alert can be raised anew (dedup only skips unacked).
-	id3, _ := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 600})
+	id3, _, _ := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityWarn, Category: model.AlertBacklog, Message: "backlog growing", CreatedAt: 600})
 	if id3 == id1 {
 		t.Error("expected a new alert row after prior was acked")
 	}
@@ -853,7 +853,7 @@ func TestPruneAckedAlerts(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	for i := 0; i < 7; i++ {
-		id, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityInfo, Category: model.AlertConfig, Message: fmt.Sprintf("m%d", i), CreatedAt: 100})
+		id, _, err := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityInfo, Category: model.AlertConfig, Message: fmt.Sprintf("m%d", i), CreatedAt: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -862,7 +862,7 @@ func TestPruneAckedAlerts(t *testing.T) {
 		}
 	}
 	// One recent acked (survives) and one unacked (survives).
-	id, _ := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityInfo, Category: model.AlertConfig, Message: "recent", CreatedAt: 100})
+	id, _, _ := s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityInfo, Category: model.AlertConfig, Message: "recent", CreatedAt: 100})
 	s.AckAlert(ctx, id, 99999)
 	s.RaiseAlert(ctx, model.Alert{RigID: "r", Severity: model.SeverityInfo, Category: model.AlertConfig, Message: "live", CreatedAt: 100})
 
@@ -1259,24 +1259,24 @@ func TestUpgradeV4ToV5RestampsMissingMarks(t *testing.T) {
 
 // --- retarget overlay ----------------------------------------------------------
 
-// TestFreshDBIsSchema10AndHasOverlayColumns pins that a fresh Open lands at schema
-// version 10 and that the retarget overlay, mosaic pane and copy-keyed columns exist
+// TestFreshDBIsSchema11AndHasOverlayColumns pins that a fresh Open lands at schema
+// version 11 and that the retarget overlay, mosaic pane and copy-keyed columns exist
 // on the frames table. Column PRESENCE is all this proves; the positional coupling
 // between frameColumns, scanFrame and UpsertFrame is pinned by
 // TestFrameColumnsRoundTripEveryColumn.
-func TestFreshDBIsSchema10AndHasOverlayColumns(t *testing.T) {
+func TestFreshDBIsSchema11AndHasOverlayColumns(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t).(*sqlStore)
 
-	if model.CurrentStoreSchemaVersion != 10 {
-		t.Fatalf("CurrentStoreSchemaVersion = %d, want 10", model.CurrentStoreSchemaVersion)
+	if model.CurrentStoreSchemaVersion != 11 {
+		t.Fatalf("CurrentStoreSchemaVersion = %d, want 11", model.CurrentStoreSchemaVersion)
 	}
 	v, err := s.schemaVersion(ctx)
 	if err != nil {
 		t.Fatalf("schemaVersion: %v", err)
 	}
-	if v != 10 {
-		t.Fatalf("fresh DB schema_version = %d, want 10", v)
+	if v != 11 {
+		t.Fatalf("fresh DB schema_version = %d, want 11", v)
 	}
 
 	cols := map[string]bool{}

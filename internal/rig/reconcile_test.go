@@ -543,7 +543,7 @@ func TestAutoLinkFromExistingDataOnScan(t *testing.T) {
 func TestUnreachableAlertClearsOnReconnect(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
-	if _, err := h.store.RaiseAlert(ctx, model.Alert{
+	if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 		RigID: "rig-01", Category: model.AlertUnreachable, Severity: model.SeverityWarn,
 		Message: "rig unreachable", CreatedAt: h.nowVal.Unix(),
 	}); err != nil {

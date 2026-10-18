@@ -397,7 +397,7 @@ func TestStartSeedsUnackedAlertCount(t *testing.T) {
 	ctx := context.Background()
 
 	// An alert left unacked by a previous process.
-	if _, err := m.store.RaiseAlert(ctx, model.Alert{
+	if _, _, err := m.store.RaiseAlert(ctx, model.Alert{
 		RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertDeviceDiskLow,
 		Message: "device free space is low", CreatedAt: 1,
 	}); err != nil {

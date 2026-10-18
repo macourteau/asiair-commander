@@ -89,7 +89,7 @@ func TestStagingWriteFaultProbesInsteadOfStreaming(t *testing.T) {
 		t.Fatalf("setup: want the first cycle to hit the flush fault once, got %d", syncs)
 	}
 	// Persist the alert the fake notifier only recorded, so recovery has a row to ack.
-	if _, err := h.store.RaiseAlert(ctx, model.Alert{
+	if _, _, err := h.store.RaiseAlert(ctx, model.Alert{
 		RigID: "rig-01", Severity: model.SeverityWarn, Category: model.AlertDestinationUnavailable,
 		Message: "standing write fault", CreatedAt: h.nowVal.Unix(),
 	}); err != nil {
@@ -141,7 +141,7 @@ func TestStagingWriteFaultProbesInsteadOfStreaming(t *testing.T) {
 	}
 	// The alert clears when the probe passes, not after the backlog has copied.
 	logs := h.logBuf.String()
-	acked, filed := strings.Index(logs, "auto-acked resolved alerts"), strings.Index(logs, "rig: filed frame")
+	acked, filed := strings.Index(logs, "resolved cleared alerts"), strings.Index(logs, "rig: filed frame")
 	if acked < 0 || filed < 0 || acked > filed {
 		t.Fatalf("want the write-fault alert acked before the backlog is copied (ack at %d, first filing at %d)", acked, filed)
 	}
