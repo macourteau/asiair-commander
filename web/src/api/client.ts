@@ -515,9 +515,18 @@ export const api = {
   /**
    * The combined transfer history across every rig: frames actually pulled to the
    * NAS, newest-first, filterable by rig and/or a pulled_at window (unix seconds).
+   * `view: "never_deletable"` lists the frames behind the backlog alert instead
+   * (unclassified, held or failed, pulled or not); the window does not apply to it.
    */
   listTransferHistory: (
-    params: { rig?: string; from?: number; to?: number; page?: number; page_size?: number } = {},
+    params: {
+      rig?: string;
+      from?: number;
+      to?: number;
+      page?: number;
+      page_size?: number;
+      view?: "never_deletable";
+    } = {},
     signal?: AbortSignal,
   ) => request<FramesPage>(`/api/frames${qs(params)}`, { signal }),
   getSummary: (id: string, night?: number, signal?: AbortSignal) =>

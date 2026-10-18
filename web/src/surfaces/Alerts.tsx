@@ -4,8 +4,13 @@
  * when it happened, with an Acknowledge action. Live: refetches on the SSE
  * `alert.raised` event, whenever the snapshot's unacked count changes, and on a
  * stream reconnect (a dropped event self-heals — design architecture §8).
+ *
+ * After an Acknowledge, focus moves to the next alert's Acknowledge button, or to
+ * the page heading when none remain, so a keyboard user is never dropped on the
+ * page body when the acknowledged row's button disappears.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
   api,
   ApiError,
@@ -25,6 +30,7 @@ import {
   useToast,
 } from "@/design";
 import { alertCategoryLabel } from "../util/labels";
+import { ackButtonLabel, alertFramesLink, nextAckFocus, rigDisplayName } from "../util/alerts";
 import { absoluteTime, relativeTime } from "../util/format";
 import "./surfaces.css";
 
@@ -35,6 +41,12 @@ export function Alerts() {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acking, setAcking] = useState<Set<number>>(new Set());
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  // The alert whose Acknowledge button takes focus once the list re-renders after
+  // an ack: a number, null for the heading, or undefined when nothing is pending.
+  const [focusAfterAck, setFocusAfterAck] = useState<number | null | undefined>(undefined);
+  const rigs = snapshot?.rigs ?? [];
 
   const refetch = useCallback(
     async (signal?: AbortSignal) => {
@@ -79,10 +91,12 @@ export function Alerts() {
   const ack = useCallback(
     async (id: number) => {
       setAcking((prev) => new Set(prev).add(id));
+      const unackedIds = (alerts ?? []).filter((a) => a.acked_at === 0).map((a) => a.id);
       try {
         await api.ackAlert(id);
         toast.success("Alert acknowledged.");
         await refetch();
+        setFocusAfterAck(nextAckFocus(unackedIds, id));
       } catch (err) {
         toast.error(
           err instanceof ApiError
@@ -97,14 +111,28 @@ export function Alerts() {
         });
       }
     },
-    [refetch, toast],
+    [alerts, refetch, toast],
   );
+
+  // Runs after the post-ack list has rendered, so the target button exists (or the
+  // acknowledged one is gone).
+  useEffect(() => {
+    if (focusAfterAck === undefined) return;
+    const target =
+      focusAfterAck === null
+        ? null
+        : listRef.current?.querySelector<HTMLButtonElement>(`[data-ack-id="${focusAfterAck}"]`);
+    (target ?? headingRef.current)?.focus();
+    setFocusAfterAck(undefined);
+  }, [focusAfterAck, alerts]);
 
   return (
     <>
       <header className="surface-head">
         <div>
-          <h1 className="surface-head__title">Alerts</h1>
+          <h1 className="surface-head__title" ref={headingRef} tabIndex={-1}>
+            Alerts
+          </h1>
           <p className="surface-head__desc">
             Problems Commander has raised, newest first. Acknowledge one once
             you've dealt with it to clear it from the unread count.
@@ -150,10 +178,15 @@ export function Alerts() {
           />
         </Card>
       ) : (
-        <ul className="alert-list list-reset">
+        <ul className="alert-list list-reset" ref={listRef}>
           {alerts.map((a) => (
             <li key={a.id}>
-              <AlertRow alert={a} busy={acking.has(a.id)} onAck={() => ack(a.id)} />
+              <AlertRow
+                alert={a}
+                rigName={a.rig_id ? rigDisplayName(a.rig_id, rigs) : null}
+                busy={acking.has(a.id)}
+                onAck={() => ack(a.id)}
+              />
             </li>
           ))}
         </ul>
@@ -164,29 +197,34 @@ export function Alerts() {
 
 function AlertRow({
   alert,
+  rigName,
   busy,
   onAck,
 }: {
   alert: Alert;
+  /** The rig's display name, or null for a fleet-wide alert. */
+  rigName: string | null;
   busy: boolean;
   onAck: () => void;
 }) {
   const sev = severityView(alert.severity);
   const acked = alert.acked_at !== 0;
+  const category = alertCategoryLabel(alert.category);
+  const framesLink = alertFramesLink(alert);
   return (
     <Card
       as="article"
       className={`alert-item tone-${sev.tone}${acked ? " alert-item--acked" : ""}`}
-      aria-label={`${sev.label} alert: ${alertCategoryLabel(alert.category)}`}
+      aria-label={`${sev.label} alert: ${category}${rigName ? ` on ${rigName}` : ""}`}
     >
       <div className="alert-item__top">
         <div className="alert-item__tags">
           <StatusPill view={sev} />
-          <span className="tag">{alertCategoryLabel(alert.category)}</span>
-          {alert.rig_id && (
+          <span className="tag">{category}</span>
+          {rigName && (
             <span className="tag">
               <Icon name="rig" size={13} />
-              <span className="mono">{alert.rig_id}</span>
+              <span>{rigName}</span>
             </span>
           )}
         </div>
@@ -199,6 +237,8 @@ function AlertRow({
             loading={busy}
             icon={<Icon name="safe" size={16} />}
             onClick={onAck}
+            data-ack-id={alert.id}
+            aria-label={ackButtonLabel(category, rigName)}
           >
             Acknowledge
           </Button>
@@ -206,6 +246,11 @@ function AlertRow({
       </div>
 
       <p className="alert-item__message">{alert.message}</p>
+      {framesLink && (
+        <p className="alert-item__message">
+          <Link to={framesLink}>Show these frames in History</Link>
+        </p>
+      )}
 
       <div className="alert-item__meta">
         <span>
