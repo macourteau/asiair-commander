@@ -41,7 +41,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-270*s, -210*s, -150*s, -90*s, -30*s),
 			exposure:   55,
 			wantIntSec: 60,
-			wantNextff: 30 * s, // last (-30s) + 60s interval = +30s
+			wantNextff: 85 * s, // last (-30s) + 60s interval + 55s exposure
 			wantSample: 5,
 		},
 		{
@@ -50,7 +50,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-780*s, -720*s, -660*s, -60*s), // gaps 60,60,600 → median 60
 			exposure:   55,
 			wantIntSec: 60,
-			wantNextff: 0, // -60s + 60s = due now
+			wantNextff: 55 * s, // -60s + 60s + 55s
 			wantSample: 4,
 		},
 		{
@@ -58,7 +58,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-120*s, -30*s), // one 90s gap
 			exposure:   55,
 			wantIntSec: 90,
-			wantNextff: 60 * s, // -30s + 90s
+			wantNextff: 115 * s, // -30s + 90s + 55s
 			wantSample: 2,
 		},
 		{
@@ -67,7 +67,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-20 * s),
 			exposure:   300,
 			wantIntSec: 300,
-			wantNextff: 280 * s, // -20s + 300s
+			wantNextff: 580 * s, // -20s + 300s + 300s
 			wantSample: 1,
 		},
 		{
@@ -95,7 +95,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-3060*s, -3000*s),
 			exposure:   800,
 			wantIntSec: 60,
-			wantNextff: -2940 * s, // -3000s + 60s, overdue but live
+			wantNextff: -2140 * s, // -3000s + 60s + 800s, overdue but live
 			wantSample: 2,
 		},
 		{
@@ -107,10 +107,10 @@ func TestPredictFrames(t *testing.T) {
 		{
 			// Overdue is normal, not expiry: ETA is in the past yet still Predicting.
 			name:       "overdue keeps predicting",
-			captures:   caps(-180*s, -90*s), // 90s gap, newest 90s ago
+			captures:   caps(-235*s, -145*s), // 90s gap, newest 145s ago
 			exposure:   55,
 			wantIntSec: 90,
-			wantNextff: 0, // -90s + 90s = predBase exactly (due now)
+			wantNextff: 0, // -145s + 90s + 55s = predBase exactly (due now)
 			wantSample: 2,
 		},
 		{
@@ -119,7 +119,7 @@ func TestPredictFrames(t *testing.T) {
 			captures:   caps(-720*s, -420*s, -360*s, -60*s, 0),
 			exposure:   60,
 			wantIntSec: 180,
-			wantNextff: 180 * s, // newest at predBase + 180s
+			wantNextff: 240 * s, // newest at predBase + 180s + 60s
 			wantSample: 5,
 		},
 	}
@@ -156,6 +156,44 @@ func TestPredictFrames(t *testing.T) {
 	}
 }
 
+// The ETA is when the next frame's FILE should land, not when its exposure starts.
+// DATE-OBS is the exposure start, so the newest capture's file appeared about one
+// exposure after it, and the next exposure began one interval after it; its file
+// lands one exposure later still. Anchoring at capture + interval reads "due now"
+// the moment a file lands and "overdue" for the whole of the next exposure.
+func TestPredictFramesETAIsNextFileArrival(t *testing.T) {
+	const s = time.Second
+	// 300s exposures every 310s. The newest exposure started 310s ago, so its file
+	// landed about 10s ago and the next exposure started just now.
+	got := predictFrames(caps(-930*s, -620*s, -310*s), 300, predBase, 0)
+	if got == nil {
+		t.Fatal("predictFrames = nil, want a prediction")
+	}
+	if want := predBase.Add(300 * s).Unix(); got.NextExpectedTS != want {
+		t.Fatalf("NextExpectedTS = %+ds from now, want +300s (next exposure started now, its file lands one exposure later)",
+			got.NextExpectedTS-predBase.Unix())
+	}
+}
+
+// The liveness window never ends a prediction before its ETA: a cadence slower than
+// the exposure-based window (here 3700s gaps against max(5×60s, 1h)) keeps predicting
+// until capture + interval + exposure, and expires once past both.
+func TestPredictFramesLivenessCoversETA(t *testing.T) {
+	const s = time.Second
+	// Newest capture 3650s ago: past the 1h window, before the 3760s ETA lead.
+	got := predictFrames(caps(-7350*s, -3650*s), 60, predBase, 0)
+	if got == nil {
+		t.Fatal("predictFrames = nil before the ETA, want a prediction")
+	}
+	if want := predBase.Add(110 * s).Unix(); got.NextExpectedTS != want {
+		t.Errorf("NextExpectedTS = %+ds from now, want +110s", got.NextExpectedTS-predBase.Unix())
+	}
+	// Newest capture 3761s ago: past the window and the ETA.
+	if got := predictFrames(caps(-7461*s, -3761*s), 60, predBase, 0); got != nil {
+		t.Errorf("predictFrames = %+v past both the window and the ETA, want nil", got)
+	}
+}
+
 // The gaps are device-domain, so a non-zero device clock offset cancels out of the
 // interval; only the ETA anchor is corrected by -offset, once, into host domain.
 func TestPredictFramesOffsetCancellation(t *testing.T) {
@@ -173,8 +211,8 @@ func TestPredictFramesOffsetCancellation(t *testing.T) {
 	if got.IntervalSec != 60 {
 		t.Errorf("IntervalSec = %v, want 60 (offset must cancel in the gaps)", got.IntervalSec)
 	}
-	// Host-domain ETA: newest host capture (predBase) + 60s interval.
-	if want := predBase.Add(60 * s).Unix(); got.NextExpectedTS != want {
+	// Host-domain ETA: newest host capture (predBase) + 60s interval + 55s exposure.
+	if want := predBase.Add(115 * s).Unix(); got.NextExpectedTS != want {
 		t.Errorf("NextExpectedTS = %d, want %d (anchor corrected by -offset)", got.NextExpectedTS, want)
 	}
 }

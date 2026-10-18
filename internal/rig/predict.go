@@ -27,9 +27,9 @@ const predictStatePredicting = "predicting"
 // It is pure — no device, store, or SMB dependency — so the cadence math and the
 // liveness gate are unit-testable without a rig. It returns nil (→ Unknown; the
 // caller leaves RigStatus.Prediction unset) when there are no captures, when the
-// gaps yield no usable interval, or when the newest capture is already outside the
-// liveness window. The window and the ETA anchor are both evaluated in the HOST
-// domain by correcting the device capture time with -offset, exactly as
+// gaps yield no usable interval, or when the newest capture is already past both
+// the liveness window and the ETA. The window and the ETA anchor are both evaluated
+// in the HOST domain by correcting the device capture time with -offset, exactly as
 // clock.Clock.YoungerThan corrects a device timestamp.
 func predictFrames(captures []time.Time, lastExposureSec float64, now time.Time, offset time.Duration) *model.FramePrediction {
 	if len(captures) == 0 {
@@ -39,26 +39,32 @@ func predictFrames(captures []time.Time, lastExposureSec float64, now time.Time,
 	// same transform the min-file-age check uses).
 	lastHost := captures[len(captures)-1].Add(-offset)
 
-	// Capture-time liveness gate (design features §5): predict only while the newest
-	// capture is recent. This is measured from CAPTURE time, never arrival/filed
-	// time, so a backfill of historical frames — whose newest capture is old even
-	// though the row was just filed — never predicts, with no explicit backfill
-	// detection. A live session that briefly fell behind and is catching up keeps
-	// recent captures, so it correctly stays Predicting.
-	if now.Sub(lastHost) > livenessWindow(lastExposureSec) {
-		return nil
-	}
-
 	interval, samples := cadenceInterval(captures, lastExposureSec)
 	if interval <= 0 {
 		return nil
 	}
 
-	// Anchor "next expected" at the device capture time plus the interval, then
-	// correct to host domain so the browser counts down against its own clock.
-	// Overdue is normal (overhead ran long); only the liveness window above flips
-	// the state to Unknown.
-	nextHost := lastHost.Add(interval)
+	// Anchor "next expected" on when the next frame's FILE should land (design
+	// features §5.2): the captures are DATE-OBS, the exposure START, so the next
+	// exposure starts one interval after the newest capture and its file appears one
+	// exposure after that. Anchoring at capture + interval would read "overdue" for
+	// most of every exposure. The device time is corrected to host domain so the
+	// browser counts down against its own clock. Overdue is normal (overhead ran
+	// long); only the liveness gate below flips the state to Unknown.
+	lead := interval + time.Duration(lastExposureSec*float64(time.Second))
+	nextHost := lastHost.Add(lead)
+
+	// Capture-time liveness gate (design features §5.1): predict only while the newest
+	// capture is recent. This is measured from CAPTURE time, never arrival/filed
+	// time, so a backfill of historical frames — whose newest capture is old even
+	// though the row was just filed — never predicts, with no explicit backfill
+	// detection. A live session that briefly fell behind and is catching up keeps
+	// recent captures, so it correctly stays Predicting. The gate never closes before
+	// the ETA itself: a frame not yet due is not a stalled sequence.
+	if now.Sub(lastHost) > max(livenessWindow(lastExposureSec), lead) {
+		return nil
+	}
+
 	return &model.FramePrediction{
 		State:           predictStatePredicting,
 		IntervalSec:     interval.Seconds(),
@@ -110,7 +116,8 @@ func medianDuration(ds []time.Duration) time.Duration {
 // the stable exposure, not the measured interval, because a legitimate long
 // flip/autofocus gap would inflate a measured interval to something absurd and keep
 // a dead prediction alive for hours. The 1h floor dominates for typical exposures;
-// only a very long exposure (>720s) lets 5×lastExposure win.
+// only a very long exposure (>720s) lets 5×lastExposure win. predictFrames extends
+// it to the ETA when a cadence is slower than the window.
 func livenessWindow(lastExposureSec float64) time.Duration {
 	if w := time.Duration(lastExposureSec*5) * time.Second; w > time.Hour {
 		return w
