@@ -38,6 +38,11 @@ export type DeviceLine =
 
 const STUCK = "can't be removed automatically";
 
+/** "1 frame" / "3 frames", with the verb that agrees with it. */
+function frameCount(n: number): { noun: string; verb: "is" | "are" } {
+  return n === 1 ? { noun: "1 frame", verb: "is" } : { noun: `${n} frames`, verb: "are" };
+}
+
 export function deviceLine(
   df: DeviceFrames | null | undefined,
   keepOriginals: boolean,
@@ -58,9 +63,10 @@ export function deviceLine(
   // A keep-originals rig never deletes, so its line always shows, zero included:
   // there is no drained state to fall back on.
   if (keepOriginals) {
-    const parts: DeviceLinePart[] = [{ text: `${df.kept} kept on the device` }];
+    const kept = frameCount(df.kept);
+    const parts: DeviceLinePart[] = [{ text: `${kept.noun} ${kept.verb} kept on the device` }];
     if (df.stuck > 0) {
-      parts.push({ text: ", " }, { text: `${df.stuck} ${STUCK}`, problem: true });
+      parts.push({ text: "; " }, { text: `${df.stuck} ${STUCK}`, problem: true });
       stuckLink();
     }
     return frames(parts, "keep_originals", links);
@@ -87,9 +93,13 @@ export function deviceLine(
 
   // A single reason reads as a plain sentence rather than "N: N …".
   if (reasons.length === 1) {
-    if (df.in_grace > 0) return frames([{ text: head }], badge, links);
-    if (df.culled > 0) return frames([{ text: `${df.culled} removed from the library, leaving the device` }], badge, links);
-    if (df.stuck > 0) return frames([{ text: `${head} ` }, { text: STUCK, problem: true }], badge, links);
+    const { noun, verb } = frameCount(total);
+    if (df.in_grace > 0) return frames([{ text: `${noun} on the device ${verb} in grace` }], badge, links);
+    if (df.due > 0) return frames([{ text: `${noun} on the device ${verb} due for removal` }], badge, links);
+    if (df.culled > 0) {
+      return frames([{ text: `${noun} removed from the library ${verb} leaving the device` }], badge, links);
+    }
+    return frames([{ text: `${noun} on the device ` }, { text: STUCK, problem: true }], badge, links);
   }
   const parts: DeviceLinePart[] = [{ text: `${head}: ` }];
   reasons.forEach((r, i) => {

@@ -2054,24 +2054,27 @@ than hiding the line as an uncopied-only device does. The recompute after a dism
 once a listing has published counts, so a dismiss on a rig not yet checked leaves "Device not
 checked yet" in place.
 
-**How the card reads.** The headline is the sum, followed by each non-zero reason:
+**How the card reads.** A single reason reads as one sentence; with two or more, the headline
+is the sum, followed by each non-zero reason:
 
-- "3 still on the device" with the **in grace** badge, when every frame is in grace.
+- "3 frames on the device are in grace" with the **in grace** badge, when every frame is in grace.
 - "5 still on the device: 3 in grace, 2 can't be removed automatically", with the badge and a
   "Why they stay" link to `/history?rig=<id>&view=never_deletable`.
-- "2 still on the device can't be removed automatically", with the link and no badge.
-- "4 still on the device: 4 due for removal", while the delete pass works through them.
-- "1 removed from the library, leaving the device", with a link to the rig's missing-frames panel
+- "2 frames on the device can't be removed automatically", with the link and no badge.
+- "4 frames on the device are due for removal", while the delete pass works through them.
+- "1 frame removed from the library is leaving the device", with a link to the rig's missing-frames panel
   in Devices.
-- "12 kept on the device" with the **keep originals** badge, and any stuck frames named after it:
-  "12 kept on the device, 2 can't be removed automatically", with the link.
+- "12 frames are kept on the device" with the **keep originals** badge, and any stuck frames named
+  after it: "12 frames are kept on the device; 2 can't be removed automatically", with the link.
 - "Device drained — space freed".
 
 The badge appears only while `in_grace` is non-zero. The stuck segment takes the problem tone,
 and its "Why they stay" link uses the same builder as the backlog alert's
 (`web/src/util/alerts.ts`); the culled segment's link reads "Missing frames". Each link's
 accessible name starts with its visible text and names the rig. A keep-originals rig has no
-drained state to fall back on, so its line always shows, "0 kept on the device" included.
+drained state to fall back on, so its line always shows, "0 frames are kept on the device"
+included. A single reason reads as a whole sentence, "frame" or "frames" and "is" or "are"
+agreeing with its count; two or more reasons follow the sum, as above.
 Devices' live line renders the same sentence from the same helper (`web/src/util/drain.ts`) in
 compact form: no badge and no links, since the rig's panels sit just below it.
 

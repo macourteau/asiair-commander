@@ -20,9 +20,10 @@ describe("deviceLine", () => {
     expect(line(frames({})).kind).toBe("hidden");
   });
 
-  it("says frames all in grace with the badge alone", () => {
+  it("says frames all in grace as a sentence, with the badge", () => {
     const l = line(frames({ in_grace: 3 }));
-    expect(l).toMatchObject({ kind: "frames", text: "3 still on the device", badge: "in_grace", links: [] });
+    expect(l).toMatchObject({ kind: "frames", text: "3 frames on the device are in grace", badge: "in_grace", links: [] });
+    expect(line(frames({ in_grace: 1 }))).toMatchObject({ text: "1 frame on the device is in grace" });
   });
 
   it("names each reason when frames stay for more than one", () => {
@@ -36,7 +37,8 @@ describe("deviceLine", () => {
 
   it("never claims stuck frames are in grace", () => {
     const l = line(frames({ stuck: 2 }));
-    expect(l).toMatchObject({ kind: "frames", text: "2 still on the device can't be removed automatically", badge: null });
+    expect(l).toMatchObject({ kind: "frames", text: "2 frames on the device can't be removed automatically", badge: null });
+    expect(line(frames({ stuck: 1 }))).toMatchObject({ text: "1 frame on the device can't be removed automatically" });
   });
 
   it("gives the stuck reason the problem tone and links to why they stay", () => {
@@ -53,12 +55,14 @@ describe("deviceLine", () => {
   });
 
   it("says frames past grace are due for removal", () => {
-    expect(line(frames({ due: 4 }))).toMatchObject({ text: "4 still on the device: 4 due for removal", badge: null });
+    expect(line(frames({ due: 4 }))).toMatchObject({ text: "4 frames on the device are due for removal", badge: null });
+    expect(line(frames({ due: 1 }))).toMatchObject({ text: "1 frame on the device is due for removal" });
   });
 
   it("says culled frames are leaving, with a link to the missing-frames panel", () => {
     const l = line(frames({ culled: 1 }));
-    expect(l).toMatchObject({ text: "1 removed from the library, leaving the device", badge: null });
+    expect(l).toMatchObject({ text: "1 frame removed from the library is leaving the device", badge: null });
+    expect(line(frames({ culled: 2 }))).toMatchObject({ text: "2 frames removed from the library are leaving the device" });
     if (l.kind !== "frames") throw new Error(l.kind);
     expect(l.links).toEqual([
       {
@@ -77,13 +81,13 @@ describe("deviceLine", () => {
 
   it("reads a keep-originals rig as kept, naming its stuck frames after", () => {
     expect(line(frames({ kept: 12 }), true)).toMatchObject({
-      text: "12 kept on the device",
+      text: "12 frames are kept on the device",
       badge: "keep_originals",
       links: [],
     });
     const l = line(frames({ kept: 12, stuck: 2 }), true);
     expect(l).toMatchObject({
-      text: "12 kept on the device, 2 can't be removed automatically",
+      text: "12 frames are kept on the device; 2 can't be removed automatically",
       badge: "keep_originals",
     });
     if (l.kind !== "frames") throw new Error(l.kind);
@@ -91,6 +95,7 @@ describe("deviceLine", () => {
   });
 
   it("shows a keep-originals rig's line even with nothing kept", () => {
-    expect(line(frames({}), true)).toMatchObject({ text: "0 kept on the device", badge: "keep_originals" });
+    expect(line(frames({}), true)).toMatchObject({ text: "0 frames are kept on the device", badge: "keep_originals" });
+    expect(line(frames({ kept: 1 }), true)).toMatchObject({ text: "1 frame is kept on the device" });
   });
 });
