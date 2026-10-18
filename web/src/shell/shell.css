@@ -232,17 +232,26 @@
   .shell-topbar__brand svg {
     color: var(--accent);
   }
+  /* The drawer opens below the top bar rather than over it: the bar stacks
+     above the drawer (--z-sticky > --z-nav) because it holds the menu toggle
+     that closes it, so a drawer starting at the viewport top hides its own
+     first rows behind the bar. */
   .shell-nav {
     position: fixed;
-    inset: 0 auto 0 0;
+    inset: var(--topbar-height) auto 0 0;
     z-index: var(--z-nav);
-    height: 100dvh;
     transform: translateX(-100%);
     transition: transform var(--dur-base) var(--ease);
     box-shadow: var(--shadow-overlay);
   }
   .shell-nav--open {
     transform: translateX(0);
+  }
+  /* The top bar already shows the mark and name; the drawer keeps only the
+     version line and the newer-release link. */
+  .shell-brand__mark,
+  .shell-brand__name {
+    display: none;
   }
   .shell-drawer-scrim {
     display: block;
