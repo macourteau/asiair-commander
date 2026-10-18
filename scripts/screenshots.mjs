@@ -44,6 +44,9 @@
  *                       first-run pass is skipped when unset.
  *   AC_SETUP_DATA_DIR   That instance's data directory, holding setup-token.
  *                       Required when AC_SETUP_TARGET is set.
+ *   COLOR_SCHEME        "light" or "dark": the prefers-color-scheme the browser
+ *                       reports. The SPA follows it when no theme is stored, and
+ *                       each run starts from a fresh context. Default light.
  */
 
 import { execSync } from "node:child_process";
@@ -108,9 +111,14 @@ const OUT_RAW = process.env.OUT ?? "scripts/screenshots";
 const OUT = isAbsolute(OUT_RAW) ? OUT_RAW : join(REPO_ROOT, OUT_RAW);
 const SETUP_TARGET = process.env.AC_SETUP_TARGET;
 const SETUP_DATA_DIR = process.env.AC_SETUP_DATA_DIR;
+const COLOR_SCHEME = process.env.COLOR_SCHEME ?? "light";
 
 if (!PASSWORD) {
   console.error("AC_PASSWORD is required (the shared login password). Set it and re-run.");
+  process.exit(1);
+}
+if (COLOR_SCHEME !== "light" && COLOR_SCHEME !== "dark") {
+  console.error(`COLOR_SCHEME must be "light" or "dark", not "${COLOR_SCHEME}".`);
   process.exit(1);
 }
 if (SETUP_TARGET && !SETUP_DATA_DIR) {
@@ -149,8 +157,8 @@ const DESKTOP = {
 };
 
 const DEVICES = [
-  { name: "mobile", profile: IPHONE_16_PRO, mobile: true },
-  { name: "desktop", profile: DESKTOP, mobile: false },
+  { name: "mobile", profile: { ...IPHONE_16_PRO, colorScheme: COLOR_SCHEME }, mobile: true },
+  { name: "desktop", profile: { ...DESKTOP, colorScheme: COLOR_SCHEME }, mobile: false },
 ];
 
 // Authenticated surfaces. A stable selector per surface avoids shooting a spinner.

@@ -4,6 +4,10 @@ The images in this directory are the curated screenshots the top-level README sh
 captured from the `-tags demo` build, whose in-memory rigs produce synthetic frames: no real
 device, network or capture appears in them.
 
+Each image comes in the light theme (`<name>.webp`) and the dark theme (`<name>-dark.webp`). The
+README wraps each pair in a `<picture>` whose `prefers-color-scheme: dark` source picks the dark
+one, so GitHub shows the theme matching the reader's, with the light image as the fallback.
+
 ## Credit for the rendered sky
 
 The star fields in the frame previews and thumbnails are rendered by `tools/starfield` from the
@@ -20,8 +24,10 @@ make screenshots
 ```
 
 This builds the SPA and a demo binary, seeds a live demo data dir, runs the demo until enough
-frames have been filed and plate-solved, captures every surface with `scripts/screenshots.mjs`,
-and rewrites the WebP files here. The build is stamped with the latest `v*` tag, so the images
+frames have been filed and plate-solved, captures every surface with `scripts/screenshots.mjs`
+once with the browser reporting a light colour scheme and once a dark one (`COLOR_SCHEME`; the SPA
+follows it when no theme is stored), and rewrites the WebP files here. The two passes run a minute
+or so apart against the live demo, so a light image and its dark twin can show different frames. The build is stamped with the latest `v*` tag, so the images
 show a release version, and the update check is turned off in the seeded config, so the run never
 calls GitHub. It needs Go, Node with a global Playwright install
 (`npm install -g playwright`), `sqlite3` and `cwebp`. A first run downloads the Gaia cones, the

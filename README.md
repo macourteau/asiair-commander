@@ -15,23 +15,24 @@ or supported by ZWO.
 
 ## Screenshots
 
-![The dashboard: one card per rig, each copying a frame, with what is still on the device and whether it is safe to power off](docs/screenshots/dashboard.webp)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-dark.webp"><img src="docs/screenshots/dashboard.webp" alt="The dashboard: one card per rig, with its copy and cleanup progress, the next-frame countdown, what is still on the device and whether it is safe to power off"></picture>
 
 *Tonight's dashboard: each rig's card says whether it is safe to power off, what it is copying
 and what is left on the device.*
 
-![The live feed: frames from both rigs with thumbnails, plate-solved coordinates and rotation, copying, pending deletion and deleted](docs/screenshots/feed.webp)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/feed-dark.webp"><img src="docs/screenshots/feed.webp" alt="The live feed: frames from both rigs with thumbnails, plate-solved coordinates and rotation, and each frame's state"></picture>
 
 *The live feed: every frame as it is discovered, copied, filed and cleaned up, with a thumbnail
 and the coordinates and rotation of Commander's own plate solve.*
 
 <p>
-<img src="docs/screenshots/frame-detail.webp" width="360" alt="A frame's detail: a stretched preview of the globular cluster M13 above its device, state, target and filter">
-<img src="docs/screenshots/dashboard-mobile.webp" width="200" alt="The dashboard on a phone">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/frame-detail-dark.webp"><img src="docs/screenshots/frame-detail.webp" width="360" alt="A frame's detail: a stretched preview of the globular cluster M13 above its device, state, target and filter"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-mobile-dark.webp"><img src="docs/screenshots/dashboard-mobile.webp" width="200" alt="The dashboard on a phone"></picture>
 </p>
 
 *Left, a frame's detail with its preview; right, the dashboard on a phone.*
 
+Commander has a light and a dark theme, and the screenshots follow your GitHub theme.
 The screenshots come from the demo build, whose rigs and frames are synthetic. The star fields
 are rendered from the Gaia DR3 catalogue (ESA/Gaia/DPAC,
 [CC BY-NC 3.0 IGO](https://www.cosmos.esa.int/web/gaia-users/license));
