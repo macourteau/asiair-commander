@@ -71,7 +71,8 @@ async function run(browser, device) {
     page.waitForURL((u) => !u.pathname.startsWith("/login")),
     page.click('button[type="submit"]'),
   ]);
-  await page.waitForSelector("nav, main, h1");
+  // `main`: the first "nav" match on mobile is the closed, hidden nav drawer.
+  await page.waitForSelector("main");
 
   await page.goto(`${BASE}/tools`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("table tbody tr");

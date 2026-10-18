@@ -280,7 +280,9 @@ async function authenticate(page) {
     throw new Error(`Login failed: ${errText?.trim() || err.message}`);
   });
   // Confirm the authenticated shell rendered, not a flash of the login route.
-  await page.waitForSelector("nav, main, h1", { timeout: NAV_TIMEOUT });
+  // `main` and not a selector list: waitForSelector waits on the first match
+  // becoming visible, and on mobile that is the closed (hidden) nav drawer.
+  await page.waitForSelector("main", { timeout: NAV_TIMEOUT });
 }
 
 /**
