@@ -191,12 +191,17 @@ func (p *previewer) Dimensions(destPath string) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	w, wok := h.Int("NAXIS1")
-	ht, hok := h.Int("NAXIS2")
-	if !wok || !hok || w <= 0 || ht <= 0 {
+	w64, wok := h.Int("NAXIS1")
+	ht64, hok := h.Int("NAXIS2")
+	if !wok || !hok || w64 <= 0 || ht64 <= 0 {
 		return 0, 0, fmt.Errorf("preview: missing NAXIS1/NAXIS2 in %s", destPath)
 	}
-	return int(w), int(ht), nil
+	w, wok := int32Of(w64)
+	ht, hok := int32Of(ht64)
+	if !wok || !hok {
+		return 0, 0, fmt.Errorf("preview: NAXIS1/NAXIS2 %dx%d out of range in %s", w64, ht64, destPath)
+	}
+	return w, ht, nil
 }
 
 // EvictDigest removes a frame's cached previews (lifecycle eviction).

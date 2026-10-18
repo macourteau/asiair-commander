@@ -193,6 +193,48 @@ func TestUnzipFlat(t *testing.T) {
 	}
 }
 
+// TestUnzipFlatStaysInsideDestination feeds traversal-shaped entry names (relative
+// escapes, an absolute path, a Windows-separator escape) and checks that nothing
+// lands outside the destination directory.
+func TestUnzipFlatStaysInsideDestination(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	names := []string{"../escape1.1476", "../../escape2.1476", "/abs/escape3.1476", `..\escape4.1476`, ".."}
+	for _, name := range names {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("tile")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	src := filepath.Join(t.TempDir(), "cat.zip")
+	if err := os.WriteFile(src, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(parent, "out")
+	if err := unzipFlat(src, dst); err != nil {
+		t.Fatalf("unzipFlat: %v", err)
+	}
+	ents, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != 1 || ents[0].Name() != "out" {
+		t.Fatalf("entries escaped the destination: %v", ents)
+	}
+	for _, base := range []string{"escape1.1476", "escape2.1476", "escape3.1476"} {
+		if _, err := os.Stat(filepath.Join(dst, base)); err != nil {
+			t.Errorf("expected flattened tile %s: %v", base, err)
+		}
+	}
+}
+
 // TestDownloadResumable serves a catalog zip with Range support and verifies both a
 // fresh download and a resume-from-partial path install the catalog, and that the
 // resume actually sends a Range header rather than restarting.
