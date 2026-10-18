@@ -3,7 +3,7 @@
  * primary (accent), secondary (bordered), ghost (borderless), danger (destructive).
  *
  * Props: variant, size ("md" | "sm"), block (full width), loading (shows a
- * spinner and disables), plus all native <button> props. Provide a leading/
+ * spinner and ignores activation), plus all native <button> props. Provide a leading/
  * trailing icon via the `icon`/`iconAfter` slots.
  *
  *   <Button variant="primary" icon={<Icon name="scan" />}>Scan network</Button>
@@ -33,6 +33,7 @@ export function Button({
   children,
   className = "",
   type = "button",
+  onClick,
   ...rest
 }: ButtonProps) {
   const classes = [
@@ -45,12 +46,24 @@ export function Button({
     .filter(Boolean)
     .join(" ");
 
+  // A loading button stays focusable (aria-disabled, not disabled): natively
+  // disabling the focused button drops keyboard focus to <body>, so a keyboard or
+  // screen-reader user loses their place every time an action is in flight.
+  const busy = loading && !disabled;
   return (
     <button
       type={type}
       className={classes}
-      disabled={disabled || loading}
+      disabled={disabled}
+      aria-disabled={busy || undefined}
       aria-busy={loading || undefined}
+      onClick={(e) => {
+        if (busy) {
+          e.preventDefault(); // also blocks a submit button's form submission
+          return;
+        }
+        onClick?.(e);
+      }}
       {...rest}
     >
       {loading ? <Spinner size={16} /> : icon}

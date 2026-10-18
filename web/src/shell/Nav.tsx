@@ -10,15 +10,14 @@ import { Badge, Button, Icon, IconButton, useTheme, useToast, type IconName } fr
 import { api, ApiError, useConnState, useServerInfo, useSnapshot } from "@/api";
 import { themeSwitchView } from "../util/themeSwitch";
 import { newerRelease, RELEASES_URL } from "../util/version";
+import { unackedAlertsLabel } from "../util/labels";
+import type { PageRoute } from "../util/pageTitle";
 
-interface NavItem {
-  to: string;
-  label: string;
+interface NavItem extends PageRoute {
   icon: IconName;
-  end?: boolean;
 }
 
-const ITEMS: NavItem[] = [
+export const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
   { to: "/feed", label: "Live feed", icon: "feed" },
   { to: "/devices", label: "Devices", icon: "devices" },
@@ -52,7 +51,11 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
   const conn = useConnState();
 
   return (
-    <nav className={`shell-nav${open ? " shell-nav--open" : ""}`} aria-label="Main">
+    <nav
+      id="main-nav"
+      className={`shell-nav${open ? " shell-nav--open" : ""}`}
+      aria-label="Main"
+    >
       <div className="shell-brand">
         <Icon name="rig" size={24} className="shell-brand__mark" />
         <div className="shell-brand__text">
@@ -71,7 +74,7 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
       </div>
 
       <ul className="shell-navlist list-reset">
-        {ITEMS.map((item) => (
+        {NAV_ITEMS.map((item) => (
           <li key={item.to}>
             <NavLink
               to={item.to}
@@ -84,12 +87,7 @@ export function Nav({ unackedAlerts, onLogout, onNavigate, open = false }: NavPr
               <Icon name={item.icon} size={18} />
               <span className="shell-navlink__label">{item.label}</span>
               {item.to === "/alerts" && unackedAlerts > 0 && (
-                <Badge
-                  variant="problem"
-                  aria-label={`${unackedAlerts} unacknowledged ${
-                    unackedAlerts === 1 ? "alert" : "alerts"
-                  }`}
-                >
+                <Badge variant="problem" srLabel={unackedAlertsLabel(unackedAlerts)}>
                   {unackedAlerts}
                 </Badge>
               )}

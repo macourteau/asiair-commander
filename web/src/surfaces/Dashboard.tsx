@@ -206,7 +206,7 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
             label={`${alerts.length} active ${alerts.length === 1 ? "alert" : "alerts"}`}
           />
           <Link to="/alerts" className="text-sm">
-            Review
+            Review<span className="sr-only"> alerts for {rig.name}</span>
           </Link>
         </div>
       )}
@@ -247,6 +247,7 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
         onClick={() => setOpen((v) => !v)}
       >
         {open ? "Hide detail" : "More detail"}
+        <span className="sr-only"> for {rig.name}</span>
         <Icon name="chevron-down" size={16} />
       </button>
 
@@ -303,7 +304,7 @@ function DrainRow({
         <span>
           <span className="mono">{drain}</span> on the device
         </span>
-        <Badge aria-label="This rig never deletes originals from the device">
+        <Badge srLabel="Keep originals: this rig never deletes originals from the device">
           keep originals
         </Badge>
       </div>
@@ -327,7 +328,7 @@ function DrainRow({
         )}
       </span>
       {!drained && (
-        <Badge aria-label="Originals kept during the grace period before deletion">
+        <Badge srLabel="In grace: originals kept during the grace period before deletion">
           in grace
         </Badge>
       )}

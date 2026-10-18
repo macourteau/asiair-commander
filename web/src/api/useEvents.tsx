@@ -12,7 +12,8 @@
  * we were disconnected (design architecture §8: a lossy stream self-heals via
  * refetch).
  *
- * Significant changes (a rig going offline, a new alert) are announced politely
+ * Significant changes (a rig going offline, a new alert, a rig's safe-to-power-off
+ * verdict entering or leaving "safe") are announced politely
  * to screen readers via the coalescing announcer — never spammed.
  */
 import {
@@ -26,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAnnounce } from "../design/announcer";
+import { safeTransitions } from "../util/safeAnnounce";
 import type {
   AlertRaisedEvent,
   RigPresenceEvent,
@@ -88,6 +90,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hadConnected = useRef(false);
   const closedByUs = useRef(false);
+  const lastSnapshot = useRef<Snapshot | null>(null);
 
   const emit = useCallback((event: EventName, data: unknown) => {
     const set = subscribers.current.get(event);
@@ -133,7 +136,10 @@ export function EventsProvider({ children }: { children: ReactNode }) {
 
       es.addEventListener("snapshot", (e) => {
         try {
-          setSnapshot(JSON.parse((e as MessageEvent).data) as Snapshot);
+          const next = JSON.parse((e as MessageEvent).data) as Snapshot;
+          for (const msg of safeTransitions(lastSnapshot.current, next)) announce(msg);
+          lastSnapshot.current = next;
+          setSnapshot(next);
         } catch (err) {
           console.error("events: bad snapshot payload", err);
         }

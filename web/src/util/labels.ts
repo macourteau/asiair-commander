@@ -66,3 +66,8 @@ export function rigIdFromField(field: string): string | null {
   const m = /^rigs\[([^\]]+)\]/.exec(field);
   return m?.[1] ?? null;
 }
+
+/** Screen-reader wording for an unacknowledged-alert count badge. */
+export function unackedAlertsLabel(n: number): string {
+  return `${n} unacknowledged ${n === 1 ? "alert" : "alerts"}`;
+}

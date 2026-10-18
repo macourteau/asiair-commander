@@ -535,8 +535,10 @@ export function Settings() {
               help="Remove spaces from a target's folder name so paths stay tidy."
               example="'NGC 7000' becomes 'NGC7000'"
             >
-              {() => (
+              {(f) => (
                 <Toggle
+                  {...f}
+                  stateLabel
                   checked={config.strip_target_spaces}
                   onChange={(v) => patch({ strip_target_spaces: v })}
                   label={config.strip_target_spaces ? "On" : "Off"}
@@ -621,8 +623,10 @@ export function Settings() {
               help="Compute each light frame's WCS from its stars. Takes effect after a restart."
               example={config.plate_solve_enabled ? "On" : "Off"}
             >
-              {() => (
+              {(f) => (
                 <Toggle
+                  {...f}
+                  stateLabel
                   checked={config.plate_solve_enabled}
                   onChange={(v) => patch({ plate_solve_enabled: v })}
                   label={config.plate_solve_enabled ? "On" : "Off"}
@@ -695,8 +699,10 @@ export function Settings() {
             help="Makes one request an hour to api.github.com and, when a newer release exists, shows a link next to the version in the menu. Applies as soon as you save."
             example={config.update_check_disabled ? "Off" : "On"}
           >
-            {() => (
+            {(f) => (
               <Toggle
+                {...f}
+                stateLabel
                 checked={!config.update_check_disabled}
                 onChange={(v) => patch({ update_check_disabled: !v })}
                 label={config.update_check_disabled ? "Off" : "On"}
@@ -1155,7 +1161,7 @@ function CatalogSection({ solver }: { solver?: ProvisionStatus }) {
                       disabled={!!solver.downloading}
                       onClick={() => download(cat.name)}
                     >
-                      Download
+                      Download<span className="sr-only"> the {cat.name} star catalog</span>
                     </Button>
                   )}
                 </span>
@@ -1501,8 +1507,10 @@ function TemplateEditor({
         help="The ASIAIR's mosaic planner names each pane <target>_<row>-<col> — Sadr_1-1, Sadr_1-2 — so without this every panel lands as its own top-level target folder. With it on, a light frame whose target reads that way is filed by the mosaic template below instead, which puts a mosaic's panels under one parent. Panels are recognised by that naming alone, so a target of your own that happens to share the shape (Abell_2-1) is treated as a panel too."
         example="'Sadr_1-1' files under 'Sadr'"
       >
-        {() => (
+        {(f) => (
           <Toggle
+            {...f}
+            stateLabel
             checked={mosaicDetection}
             onChange={onMosaicDetectionChange}
             label={mosaicDetection ? "On" : "Off"}
@@ -1694,7 +1702,7 @@ function TemplateField({
           </Button>
         ) : (
           <Button size="sm" variant="ghost" icon={<Icon name="edit" size={16} />} onClick={() => setEditing(true)}>
-            Edit
+            Edit<span className="sr-only"> {label} template</span>
           </Button>
         )}
       </div>
