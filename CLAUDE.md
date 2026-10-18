@@ -131,6 +131,11 @@ Each seeder under `tools/` stages one situation; its README gives arguments and 
 | 8789 | `seedscan` |
 | 8790 | `seedremote` (needs a `-tags demo` build) |
 
+A `-tags demo` build's frames carry synthetic sky from `tools/starfield` (Gaia DR3 cones cached
+under the user cache dir; a first run needs network), so previews, thumbnails and plate solves
+work. `make screenshots` (`PORT=` to move it off 8686) regenerates the curated README images in
+`docs/screenshots/`; never commit a rendered frame or a catalog file (Gaia is CC BY-NC 3.0 IGO).
+
 State no URL reaches is driven by the seeder's `uipass.js`. API writes need an `Origin` header and
 the `XSRF-TOKEN` cookie echoed as `X-CSRF-Token`. Full-page captures can exceed 10,000px; read the
 `-viewport` variant. A long data-dir path inflates the overflow report (Settings renders roots

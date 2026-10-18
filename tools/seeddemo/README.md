@@ -16,7 +16,10 @@ With `SEED_LIVE=1` the rigs carry the GUIDs the `-tags demo` build keys its in-m
 by (`cmd/asiair-commander/demo.go`), with delete-after-grace on and fast timings, so the feed
 shows frames go pending → transferring → filed → deleted within seconds. The store is left
 empty except for one held frame per rig (below), because the generator produces every other
-frame end to end.
+frame end to end. Those frames carry synthetic sky from `tools/starfield`: the FRA300 cycles the
+Pleiades, the Double Cluster, the Coathanger and the Beehive, the Newtonian shoots M13, and every
+frame previews and plate-solves (see [tools/starfield/README.md](../starfield/README.md)).
+`make screenshots` drives this mode end to end for the README images.
 
 ## The device file browser
 

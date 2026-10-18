@@ -13,6 +13,30 @@ be reached through a small remote that runs there.
 ASIAIR Commander is an unofficial, independent project. It is not affiliated with, endorsed by
 or supported by ZWO.
 
+## Screenshots
+
+![The dashboard: one card per rig, each copying a frame, with what is still on the device and whether it is safe to power off](docs/screenshots/dashboard.webp)
+
+*Tonight's dashboard: each rig's card says whether it is safe to power off, what it is copying
+and what is left on the device.*
+
+![The live feed: frames from both rigs with thumbnails, plate-solved coordinates and rotation, copying, pending deletion and deleted](docs/screenshots/feed.webp)
+
+*The live feed: every frame as it is discovered, copied, filed and cleaned up, with a thumbnail
+and the coordinates and rotation of Commander's own plate solve.*
+
+<p>
+<img src="docs/screenshots/frame-detail.webp" width="360" alt="A frame's detail: a stretched preview of the globular cluster M13 above its device, state, target and filter">
+<img src="docs/screenshots/dashboard-mobile.webp" width="200" alt="The dashboard on a phone">
+</p>
+
+*Left, a frame's detail with its preview; right, the dashboard on a phone.*
+
+The screenshots come from the demo build, whose rigs and frames are synthetic. The star fields
+are rendered from the Gaia DR3 catalogue (ESA/Gaia/DPAC,
+[CC BY-NC 3.0 IGO](https://www.cosmos.esa.int/web/gaia-users/license));
+[docs/screenshots](docs/screenshots/README.md) says how they are made.
+
 ## Safety model
 
 An ASIAIR cannot checksum a file for you, so a copy that only checks itself proves nothing.
@@ -91,6 +115,7 @@ Prerequisites are those of a source build, plus Docker for the integration tests
 make check            # the same checks as CI's required build-test job
 make integration      # real-SMB and real-tunnel tests against a Samba container (needs Docker)
 make dev              # how to run the backend and the Vite dev server side by side
+make screenshots      # regenerate the README screenshots from a live demo run
 ```
 
 `make check` compares the recorded protocol transcripts against `CHECK_BASE` (default

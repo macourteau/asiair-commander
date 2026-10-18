@@ -182,6 +182,13 @@ check: ## Run the same checks as CI's required build-test job
 integration: ## Stand up the Samba/NT1 container and run the real-SMB tests, direct and through a real tunnel (needs Docker)
 	test/integration/run.sh
 
+# The curated README screenshots: a live -tags demo run over synthetic sky
+# (tools/starfield), captured and written to docs/screenshots/ as WebP. See
+# scripts/readme-screenshots.sh for what it needs and caches.
+.PHONY: screenshots
+screenshots: ## Regenerate docs/screenshots/ from a live demo run (needs Playwright, sqlite3, cwebp)
+	scripts/readme-screenshots.sh
+
 .PHONY: dev
 dev: ## Run the backend and the SPA dev server (two terminals, run these separately)
 	@echo "Terminal 1: go run ./cmd/asiair-commander run"
