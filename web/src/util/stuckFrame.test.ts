@@ -28,6 +28,18 @@ describe("stuckFrameHelp", () => {
     expect(past?.next).not.toContain("next try");
   });
 
+  it("tells the operator Run now retries a failed frame, and offers it once no retry is ahead", () => {
+    const ahead = stuckFrameHelp({ state: "failed", next_retry_at: now / 1000 + 600 }, now);
+    expect(ahead?.next).toMatch(/Run now on this rig gives it one more try/);
+    expect(ahead?.canRunNow).toBe(false);
+    // An exhausted frame records no next retry (design frame-lifecycle §4.3).
+    const exhausted = stuckFrameHelp({ state: "failed" }, now);
+    expect(exhausted?.next).toMatch(/Run now on this rig gives it one more try/);
+    expect(exhausted?.canRunNow).toBe(true);
+    expect(stuckFrameHelp({ state: "held" }, now)?.canRunNow).toBe(false);
+    expect(stuckFrameHelp({ state: "unclassified" }, now)?.canRunNow).toBe(false);
+  });
+
   it("offers dismiss for an unclassified frame unless it is culled", () => {
     expect(stuckFrameHelp({ state: "unclassified" }, now)?.canDismiss).toBe(true);
     expect(

@@ -60,6 +60,22 @@ describe("StuckFrameDialog", () => {
     expect(screen.queryByRole("button", { name: "Dismiss frame" })).toBeNull();
   });
 
+  it("retries a failed frame that used up its attempts through the rig's Run now", async () => {
+    const runNow = vi.spyOn(api, "runRigNow").mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    show(frame({ state: "failed", attempts: 6 }), () => {}, onClose);
+    expect(screen.getByText(/Run now on this rig gives it one more try/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(runNow).toHaveBeenCalledWith("rig-fra");
+  });
+
+  it("offers no Run now while a failed frame's own retry is still ahead", () => {
+    show(frame({ state: "failed", attempts: 1, next_retry_at: Date.now() / 1000 + 600 }));
+    expect(screen.getByText(/The next try is/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
+  });
+
   it("dismisses an unclassified frame through the existing API and says the device file stays", async () => {
     const discard = vi.spyOn(api, "discardFrame").mockResolvedValue(undefined);
     const onDismissed = vi.fn();

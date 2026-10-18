@@ -1349,9 +1349,10 @@ This section fixes what each surface shows and the data behind it, not its look.
   the frame stays on the device and what clears it, the recorded error behind a disclosure, and
   only the actions that exist for its state. An unclassified frame offers dismiss
   ([frame-lifecycle §13](2026-10-17-frame-lifecycle.md)) and a link to its rig's unclassified
-  panel for re-classify; a failed frame retries on its own (frame-lifecycle §4.3); a held frame
-  has no operator exit ([delete-safety §2.4](2026-10-17-delete-safety.md)), and the dialog says
-  so rather than offer one.
+  panel for re-classify; a failed frame retries on its own and, with no retry ahead, offers Run
+  now on its rig (frame-lifecycle §4.3); a held frame has no operator exit
+  ([delete-safety §2.4](2026-10-17-delete-safety.md)), and the dialog says so rather than offer
+  one.
 - **Tools** (`/tools`) — find frames, retarget, and re-file to the current templates.
 - **Files** (`/files`) — the device file browser.
 - **Settings** (`/settings`) — templates with an edit mode whose token chips are scoped to

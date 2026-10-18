@@ -20,6 +20,12 @@ export interface StuckFrameHelp {
    * would clear the path its deletion needs — design frame-lifecycle §13).
    */
   canDismiss: boolean;
+  /**
+   * Whether the rig's Run now would try the frame again at once: a failed frame
+   * with no retry scheduled ahead, which is one that is due or has used up its
+   * attempts (design frame-lifecycle §4.3).
+   */
+  canRunNow: boolean;
 }
 
 /**
@@ -50,17 +56,20 @@ export function stuckFrameHelp(
           "frame leaves this list. If you have compared the two copies and are sure the NAS copy is good, " +
           "you can delete the device file yourself from the File browser.",
         canDismiss: false,
+        canRunNow: false,
       };
     case "failed": {
       const retry = frame.next_retry_at ?? 0;
-      const when =
-        retry * 1000 > now ? ` The next try is ${relativeTime(retry, now)}.` : "";
+      const ahead = retry * 1000 > now;
+      const when = ahead ? ` The next try is ${relativeTime(retry, now)}.` : "";
       return {
         why: "Commander couldn't copy this frame to the NAS, so the file on the device is the only copy.",
         next:
           "Commander tries again on its own, waiting longer after each failure, up to a set number of " +
-          `attempts.${when} The frame leaves this list once a copy succeeds.`,
+          `attempts.${when} Once those run out, Run now on this rig gives it one more try each time you ` +
+          "press it. The frame leaves this list once a copy succeeds.",
         canDismiss: false,
+        canRunNow: !ahead,
       };
     }
     case "unclassified":
@@ -72,6 +81,7 @@ export function stuckFrameHelp(
           "If its header type only needs an alias, add one in Settings, then reclassify the rig's frames " +
           "in Devices. If the file can never be read, such as a truncated or empty file, dismiss it.",
         canDismiss: !frame.missing_seen_at,
+        canRunNow: false,
       };
     default:
       return null;

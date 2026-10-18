@@ -68,6 +68,7 @@ type Store interface {
 	DeletionEligible(ctx context.Context, rigID string, graceCutoff int64) ([]model.Frame, error)
 	UnclassifiedFrames(ctx context.Context, rigID string) ([]model.Frame, error)
 	FailedDueForRetry(ctx context.Context, rigID string, now int64) ([]model.Frame, error)
+	GrantFailedRetry(ctx context.Context, rigID string, maxAttempts int) (int, error)
 	UpdateFrame(ctx context.Context, f *model.Frame) error
 	SetState(ctx context.Context, id int64, state model.FrameState) error
 	// DeferDelete spends one of the pre-delete gate's deferrals on a frame whose
@@ -1487,6 +1488,27 @@ func (s *sqlStore) UnclassifiedFrames(ctx context.Context, rigID string) ([]mode
 		return nil, fmt.Errorf("unclassified frames: %w", err)
 	}
 	return scanFrames(rows)
+}
+
+// GrantFailedRetry gives each of the rig's failed frames that has used up its
+// attempt budget (attempts >= maxAttempts) exactly one more attempt, due at once: its
+// attempt count drops to one below the budget, so the next failure exhausts it
+// again rather than restarting the whole backoff schedule. It is the operator's
+// Run now exit for such frames (design frame-lifecycle §4.3). Returns the number
+// of frames granted.
+func (s *sqlStore) GrantFailedRetry(ctx context.Context, rigID string, maxAttempts int) (int, error) {
+	res, err := s.write.ExecContext(ctx,
+		`UPDATE frames SET attempts=?, next_retry_at=NULL
+		 WHERE rig_id=? AND state=? AND attempts>=?`,
+		maxAttempts-1, rigID, string(model.StateFailed), maxAttempts)
+	if err != nil {
+		return 0, fmt.Errorf("grant failed-frame retry: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // FailedDueForRetry returns failed frames whose backoff has elapsed:
