@@ -39,6 +39,7 @@ import { NextFrame } from "./NextFrame";
 import { WaitingToSettle } from "./WaitingToSettle";
 import { RemotePill, RigRemoteLines } from "./RemoteRig";
 import { rigRemoteView } from "../util/remoteRig";
+import { drainView } from "../util/drain";
 import "./dashboard.css";
 
 export function Dashboard() {
@@ -295,6 +296,17 @@ function DrainRow({
   drain: string;
   keepOriginals: boolean;
 }) {
+  const view = drainView(drain);
+  // Until the first listing completes (an offline rig never gets one) there is no
+  // count to show and nothing known to be in its grace period.
+  if (view.kind === "unchecked") {
+    return (
+      <div className="rigcard__drain tone-neutral">
+        <Icon name="share" size={16} style={{ color: "var(--tone-fg)" }} />
+        <span>Device not checked yet</span>
+      </div>
+    );
+  }
   // A keep-originals rig never runs the delete pass: it frees no device space and
   // is never "drained", so the count reads as originals kept by design — no
   // "space freed" and no "in grace" (nothing is pending deletion).
@@ -311,7 +323,7 @@ function DrainRow({
       </div>
     );
   }
-  const drained = drain.trim().toLowerCase() === "drained";
+  const drained = view.kind === "drained";
   return (
     <div className={`rigcard__drain tone-${drained ? "safe" : "neutral"}`}>
       <Icon
@@ -324,7 +336,7 @@ function DrainRow({
           <>Device drained — space freed</>
         ) : (
           <>
-            <span className="mono">{drain}</span> still on the device
+            <span className="mono">{view.text}</span> still on the device
           </>
         )}
       </span>
