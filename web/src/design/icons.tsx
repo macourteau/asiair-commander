@@ -37,6 +37,7 @@ export type IconName =
   | "trash"
   | "edit"
   | "reclassify"
+  | "update" // two circling arrows — a newer release is available
   | "external"
   | "download" // tray with a down arrow — save a file to disk
   | "upload" // tray with an up arrow — send a file from this computer
@@ -49,6 +50,13 @@ export type IconName =
   | "file"; // page with a folded corner — a device file
 
 type Path = { d: string; fill?: boolean };
+
+const CIRCLING_ARROWS: Path[] = [
+  { d: "M4 12a8 8 0 0 1 13.7-5.6L20 8" },
+  { d: "M20 4v4h-4" },
+  { d: "M20 12a8 8 0 0 1-13.7 5.6L4 16" },
+  { d: "M4 20v-4h4" },
+];
 
 // Stroke-based glyphs unless `fill: true`. Kept deliberately simple/legible at
 // 16-20px, the sizes the UI uses most.
@@ -143,12 +151,9 @@ const ICONS: Record<IconName, Path[]> = {
     { d: "M4 20h4L19 9l-4-4L4 16v4Z" },
     { d: "M14 6l4 4" },
   ],
-  reclassify: [
-    { d: "M4 12a8 8 0 0 1 13.7-5.6L20 8" },
-    { d: "M20 4v4h-4" },
-    { d: "M20 12a8 8 0 0 1-13.7 5.6L4 16" },
-    { d: "M4 20v-4h4" },
-  ],
+  reclassify: CIRCLING_ARROWS,
+  // Same glyph, own name, so the newer-release link says what it means.
+  update: CIRCLING_ARROWS,
   external: [
     { d: "M14 4h6v6" },
     { d: "M20 4 10 14" },
