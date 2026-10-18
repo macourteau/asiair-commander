@@ -54,6 +54,11 @@ type Config struct {
 	// would be without the feature and Templates.Mosaic is neither shown nor
 	// validated.
 	MosaicDetection bool `yaml:"mosaic_detection" json:"mosaic_detection"`
+	// UpdateCheckDisabled stops the hourly request to api.github.com that asks
+	// whether a newer release exists (design features §7). Disabled rather than
+	// Enabled so the zero value is on: a config that predates the key loads with
+	// checking on, needing no schema bump and no migration. It applies live.
+	UpdateCheckDisabled bool `yaml:"update_check_disabled" json:"update_check_disabled"`
 
 	Roots                   Roots    `yaml:"roots" json:"roots"`
 	ExcludeExtensions       []string `yaml:"exclude_extensions" json:"exclude_extensions"`

@@ -224,6 +224,7 @@ table below.
 | `8687/tcp` | inbound | The same, over HTTPS with a self-signed certificate |
 | `4720/udp` | outbound broadcast | `scan_air` rig discovery (replies return to an ephemeral port) |
 | `445/tcp` | outbound | SMB to the ASIAIR rigs' file shares |
+| `443/tcp` | outbound | Hourly check of `api.github.com` for a newer release (can be switched off) |
 
 ### Volumes
 
@@ -251,6 +252,13 @@ transfer history, and your settings. Logs also stream to stdout, so
   any network mode with a route to the rig.
 - `/metrics` (Prometheus) is loopback-only unless `web.metrics_expose_lan` is
   enabled in `config.yaml`.
+- **Update check.** About once an hour Commander makes one outbound HTTPS
+  request to `api.github.com` (the repository's latest-release endpoint) to
+  find out whether a newer release has been published, and shows a link next
+  to the version in the menu when one has. Nothing is downloaded or installed,
+  and a failed request changes nothing. Switch it off with *Settings → Updates
+  → Check for new releases*, or `update_check_disabled: true` in
+  `config.yaml`.
 
 ## User and permissions
 
