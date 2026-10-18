@@ -85,7 +85,8 @@ export function History() {
   );
 
   // Frames span rigs here; look up the owning rig's keep-originals so a held-on-
-  // device verified frame reads as "Deletion on hold" rather than "Pending deletion".
+  // device verified frame reads as "Archived · kept on device" rather than
+  // "Archived · on device".
   const rigKeepsOriginals = useCallback(
     (id: string) => rigs.find((r) => r.id === id)?.keep_originals ?? false,
     [rigs],
