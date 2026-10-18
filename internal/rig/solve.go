@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -202,7 +200,7 @@ func (r *solveRunner) solveOne(ctx context.Context, f *model.Frame) {
 	// Disposition (before claiming): a frame with no pointing hint is unsolvable; a
 	// frame whose field is below every installed catalog's floor is unsolvable and
 	// records its FOV so a deeper catalog re-queues it.
-	disp := dispositionOf(hints, binningFromToken(f.Binning), n2, r.prov)
+	disp := dispositionOf(hints, n2, r.prov)
 
 	// Claim none→solving. All terminal writes go through the guarded CAS after this,
 	// so a mid-solve re-pull is never clobbered.
@@ -287,7 +285,7 @@ type disposition struct {
 	catalogDir string
 }
 
-func dispositionOf(hints *model.AstroHints, binning, naxis2 float64, prov platesolve.SolveGate) disposition {
+func dispositionOf(hints *model.AstroHints, naxis2 float64, prov platesolve.SolveGate) disposition {
 	if hints == nil || hints.RA == nil || hints.Dec == nil {
 		return disposition{unsolvable: true, reason: "no pointing hint; blind solving disabled"}
 	}
@@ -298,7 +296,7 @@ func dispositionOf(hints *model.AstroHints, binning, naxis2 float64, prov plates
 	if hints.PixelSizeUm != nil {
 		pix = *hints.PixelSizeUm
 	}
-	fov, ok := fovHeightDeg(focal, pix, binning, naxis2)
+	fov, ok := fovHeightDeg(focal, pix, naxis2)
 	if !ok {
 		return disposition{unsolvable: true, reason: "cannot determine field of view (missing FOCALLEN/XPIXSZ/NAXIS)"}
 	}
@@ -367,30 +365,18 @@ func (r *solveRunner) emit(f *model.Frame) {
 	r.hub.Emit(hub.Event{Name: "frame.done", Data: *f})
 }
 
-// binningFromToken parses the frame's binning column ("Bin1", "Bin1x2") into its
-// leading integer factor, defaulting to 1 when absent or unparseable. The hint FOV
-// uses the X factor (symmetric for virtually every ASIAIR capture).
-func binningFromToken(tok string) float64 {
-	s := strings.TrimPrefix(strings.TrimSpace(tok), "Bin")
-	if i := strings.IndexByte(s, 'x'); i >= 0 {
-		s = s[:i]
-	}
-	if n, err := strconv.Atoi(s); err == nil && n > 0 {
-		return float64(n)
-	}
-	return 1
-}
-
 // fovHeightDeg computes a frame's field height in degrees from its optics and
-// sensor geometry: the exact plate scale (206.265·XPIXSZ·binning/FOCALLEN
-// arcsec/px) times NAXIS2 rows, in degrees. Returns ok=false when an input is
+// sensor geometry: the exact plate scale (206.265·XPIXSZ/FOCALLEN arcsec/px) times
+// NAXIS2 rows, in degrees. XPIXSZ is the binned pixel pitch, the ASIAIR writing it
+// "with binning" (design asiair-hardware-notes §8.1), and NAXIS2 counts binned
+// rows, so binning never enters the product. Returns ok=false when an input is
 // missing or non-physical, so the caller marks the frame unsolvable rather than
 // passing a bogus -fov. Validated against a real frame: 300 mm / 5.94 µm / Bin1 /
 // 4042 rows → 4.585°, matching astap's own FOV estimate of 4.59°.
-func fovHeightDeg(focalLenMM, pixelSizeUm, binning, naxis2 float64) (float64, bool) {
-	if focalLenMM <= 0 || pixelSizeUm <= 0 || binning <= 0 || naxis2 <= 0 {
+func fovHeightDeg(focalLenMM, pixelSizeUm, naxis2 float64) (float64, bool) {
+	if focalLenMM <= 0 || pixelSizeUm <= 0 || naxis2 <= 0 {
 		return 0, false
 	}
-	scaleArcsecPerPx := 206.265 * pixelSizeUm * binning / focalLenMM
+	scaleArcsecPerPx := 206.265 * pixelSizeUm / focalLenMM
 	return scaleArcsecPerPx * naxis2 / 3600.0, true
 }

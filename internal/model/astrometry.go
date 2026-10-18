@@ -59,5 +59,5 @@ type AstroHints struct {
 	RA          *float64 `json:"ra,omitempty"`            // deg (object)
 	Dec         *float64 `json:"dec,omitempty"`           // deg (object)
 	FocalLenMM  *float64 `json:"focal_len_mm,omitempty"`  // mm
-	PixelSizeUm *float64 `json:"pixel_size_um,omitempty"` // µm (physical, unbinned)
+	PixelSizeUm *float64 `json:"pixel_size_um,omitempty"` // µm per binned pixel (XPIXSZ includes binning)
 }

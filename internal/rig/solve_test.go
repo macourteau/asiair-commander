@@ -2,14 +2,19 @@ package rig
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/macourteau/asiair-commander/internal/classify"
 	"github.com/macourteau/asiair-commander/internal/header"
+	"github.com/macourteau/asiair-commander/internal/header/fitstest"
 	"github.com/macourteau/asiair-commander/internal/hub"
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/platesolve"
@@ -295,4 +300,71 @@ func (r *resettingSolver) Solve(ctx context.Context, _ platesolve.Request) (plat
 		Astrometry: &model.Astrometry{Status: model.AstroStatusNone},
 	})
 	return platesolve.Result{Solution: r.sol}, nil
+}
+
+// enqueueSynthLight writes a synthetic light FITS of the given geometry and binning
+// with a full solve hint, reads its header back with the real reader, files its
+// binning column the way the filer does (classify → binningToken), and enqueues it.
+func (sh *solveHarness) enqueueSynthLight(name string, width, height, bin int, pixelUm float64) *model.Frame {
+	sh.t.Helper()
+	var cards []string
+	for _, c := range fitstest.LightCards(width, height, "Synthetic Field") {
+		switch {
+		case strings.HasPrefix(c, "XBINNING="):
+			c = fmt.Sprintf("XBINNING= %20d / Binning factor in width", bin)
+		case strings.HasPrefix(c, "YBINNING="):
+			c = fmt.Sprintf("YBINNING= %20d / Binning factor in height", bin)
+		}
+		cards = append(cards, c)
+	}
+	cards = append(cards,
+		"RA      =             313.9333 / RA of center (deg)",
+		"DEC     =              43.6814 / DEC of center (deg)",
+		"FOCALLEN=                  300 / focal length in mm",
+		fmt.Sprintf("XPIXSZ  = %20g / pixel size in microns (with binning)", pixelUm),
+		fmt.Sprintf("YPIXSZ  = %20g / pixel size in microns (with binning)", pixelUm),
+	)
+	dest := filepath.Join(sh.dir, name)
+	if err := os.WriteFile(dest, fitstest.Build(cards, fitstest.SyntheticImage(width, height)), 0o644); err != nil {
+		sh.t.Fatal(err)
+	}
+	h, err := header.New().ReadHeader(dest)
+	if err != nil {
+		sh.t.Fatal(err)
+	}
+	cls := classify.Classify(h, nil, nil)
+	if !cls.BinPresent || cls.BinX != int64(bin) {
+		sh.t.Fatalf("classify binning = %d (present %v), want %d", cls.BinX, cls.BinPresent, bin)
+	}
+	sh.fake.Headers[dest] = h
+	f := &model.Frame{
+		RigID: "rig", SourceShare: "Udisk", SourcePath: name, Size: 1, Mtime: 1,
+		FrameType: "LIGHT", Binning: binningToken(cls.BinX, cls.BinY), State: model.StateVerified, DestPath: dest,
+		Astrometry: &model.Astrometry{Status: model.AstroStatusNone},
+	}
+	if err := sh.st.UpsertFrame(context.Background(), f); err != nil {
+		sh.t.Fatal(err)
+	}
+	return f
+}
+
+// The ASIAIR's XPIXSZ already includes binning (design asiair-hardware-notes §8.1:
+// "pixel size in microns (with binning)"), so a bin-2 frame of the same sensor and
+// optics (double XPIXSZ, half NAXIS) covers the same field as the bin-1 frame, and
+// the -fov hint must match. Multiplying XPIXSZ by binning again doubles it.
+func TestSolveOne_BinnedFrameFOVMatchesUnbinned(t *testing.T) {
+	sh := newSolveHarness(t)
+	bin1 := sh.enqueueSynthLight("bin1.fit", 600, 400, 1, 3.76)
+	bin2 := sh.enqueueSynthLight("bin2.fit", 300, 200, 2, 7.52)
+	sh.runner.solveOne(context.Background(), bin1)
+	sh.runner.solveOne(context.Background(), bin2)
+
+	// 206.265 × 3.76 µm / 300 mm = 2.585 arcsec/px over 400 rows.
+	want := 206.265 * 3.76 / 300 * 400 / 3600
+	for _, f := range []*model.Frame{bin1, bin2} {
+		got := sh.status(f.ID)
+		if math.Abs(got.FOVDeg-want) > 1e-9 {
+			t.Errorf("%s (binning %s): FOVDeg = %.4f°, want %.4f°", filepath.Base(f.DestPath), f.Binning, got.FOVDeg, want)
+		}
+	}
 }
