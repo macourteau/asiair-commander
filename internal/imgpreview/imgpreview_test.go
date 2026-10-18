@@ -153,13 +153,16 @@ func TestDecodeRejectsDeterministic(t *testing.T) {
 
 // A crafted header can carry integers far past int32. They must be refused, never
 // narrowed: on a 32-bit int a wrapped BITPIX or NAXIS1 would read as a small valid one.
+// Header integers beyond int32 are rejected whatever the width of int: on a
+// 64-bit build they already fail validBitpix or the pixel ceiling, and the
+// int32 bound keeps a 32-bit build from wrapping them into valid values.
 func TestDecodeRejectsOutOfRangeHeaderIntegers(t *testing.T) {
 	cases := map[string][]string{
-		"bitpix wraps to 16": {
+		"bitpix beyond int32": {
 			card("SIMPLE", "T"), card("BITPIX", "4294967312"), card("NAXIS", "2"),
 			card("NAXIS1", "2"), card("NAXIS2", "2"),
 		},
-		"naxis1 wraps to 2": {
+		"naxis1 beyond int32": {
 			card("SIMPLE", "T"), card("BITPIX", "16"), card("NAXIS", "2"),
 			card("NAXIS1", "4294967298"), card("NAXIS2", "2"),
 		},
