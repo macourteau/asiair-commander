@@ -289,3 +289,11 @@
 .shell-nav__global {
   padding: var(--space-3) var(--space-4) 0;
 }
+/* The fleet pause names what it pauses ("Pause copying from all rigs"), which
+ * outgrows the nav column; let it wrap inside the button instead of spilling. */
+.shell-nav__global .aac-btn {
+  white-space: normal;
+  line-height: 1.25;
+  text-align: center;
+  padding-block: var(--space-2);
+}

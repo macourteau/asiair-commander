@@ -469,6 +469,7 @@ function RigItem({
     }
   }, [rig.id, onDeleted, toast]);
 
+  const rigLabel = rig.name || rig.id;
   const paused = live?.paused ?? false;
   const requested = live?.requested ?? "running";
   const runUntilIdle = live?.run_until_idle ?? false;
@@ -622,14 +623,14 @@ function RigItem({
             command(
               "pause",
               () => api.pauseRig(rig.id),
-              "Pause requested — it takes effect after the current file.",
+              "Pause requested — copying stops after the current file.",
             )
           }
           onResume={() =>
             command(
               "resume",
               () => api.resumeRig(rig.id),
-              paused ? "Rig resumed." : "Pause cancelled.",
+              paused ? "Copying resumed." : "Pause cancelled.",
             )
           }
           onRunNow={() =>
@@ -638,6 +639,7 @@ function RigItem({
           onStopRun={() =>
             command("stop", () => api.stopRun(rig.id), "Stop run requested.")
           }
+          rigName={rigLabel}
         />
         <Button
           size="sm"
@@ -645,7 +647,7 @@ function RigItem({
           icon={<Icon name="edit" size={16} />}
           onClick={onEdit}
         >
-          Edit
+          Edit{" "}<span className="sr-only">{rigLabel}</span>
         </Button>
         <Button
           size="sm"
@@ -655,7 +657,7 @@ function RigItem({
           icon={<Icon name="reclassify" size={16} />}
           onClick={() => setShowFrames((v) => !v)}
         >
-          Unclassified frames
+          Unclassified frames{" "}<span className="sr-only">on {rigLabel}</span>
         </Button>
         <Button
           size="sm"
@@ -665,7 +667,7 @@ function RigItem({
           icon={<Icon name="missing" size={16} />}
           onClick={() => setShowMissing((v) => !v)}
         >
-          Missing frames
+          Missing frames{" "}<span className="sr-only">from {rigLabel}</span>
         </Button>
         <Button
           size="sm"
@@ -675,7 +677,7 @@ function RigItem({
           icon={<Icon name="nas" size={16} />}
           onClick={() => setShowTransfers((v) => !v)}
         >
-          Recent transfers
+          Recent transfers{" "}<span className="sr-only">from {rigLabel}</span>
         </Button>
         <Button
           size="sm"
@@ -683,7 +685,7 @@ function RigItem({
           icon={<Icon name="rig" size={16} />}
           onClick={() => setConfirmReset(true)}
         >
-          Reset identity
+          Reset identity{" "}<span className="sr-only">of {rigLabel}</span>
         </Button>
         <div className="grow" />
         <IconButton

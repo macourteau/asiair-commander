@@ -32,6 +32,13 @@
   gap: var(--space-4);
   grid-template-columns: 1fr;
 }
+/* A grid item's automatic minimum is its min-content width, and a truncated
+ * filename (the transfer and cleanup readouts) contributes its full unbroken
+ * length to that, widening the card past a phone screen. Zero lets the track
+ * size the card and the filename's ellipsis do its job. */
+.dash-grid > li {
+  min-width: 0;
+}
 @media (min-width: 680px) {
   .dash-grid {
     grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));

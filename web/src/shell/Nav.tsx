@@ -167,10 +167,10 @@ function GlobalPause() {
     try {
       if (allPaused) {
         await api.resumeAll();
-        toast.success("All rigs resumed.");
+        toast.success("Copying resumed on all rigs.");
       } else {
         await api.pauseAll();
-        toast.success("All rigs paused.");
+        toast.success("Copying paused on all rigs.");
       }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Couldn't reach the server.");
@@ -188,7 +188,7 @@ function GlobalPause() {
       disabled={rigs.length === 0}
       onClick={toggle}
     >
-      {allPaused ? "Resume all rigs" : "Pause all rigs"}
+      {allPaused ? "Resume copying from all rigs" : "Pause copying from all rigs"}
     </Button>
   );
 }
