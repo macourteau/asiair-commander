@@ -79,6 +79,11 @@ type Provisioner struct {
 	log      *slog.Logger
 	client   *http.Client
 
+	// download and retryBackoff are the auto-download's catalog fetch and its wait
+	// between attempts: DownloadCatalog and backoff, replaced only by tests.
+	download     func(ctx context.Context, name string) error
+	retryBackoff func(attempt int) time.Duration
+
 	// gate serializes solving and downloading (a size-1 channel semaphore, not a
 	// Mutex, so acquire can be select-ed against ctx.Done()).
 	gate chan struct{}
@@ -108,7 +113,7 @@ func NewProvisioner(dataDir string, cfg *model.Config, st store.Store, notifier 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Provisioner{
+	p := &Provisioner{
 		dataDir:   dataDir,
 		astapDir:  filepath.Join(dataDir, "astap"),
 		cfg:       cfg,
@@ -123,6 +128,9 @@ func NewProvisioner(dataDir string, cfg *model.Config, st store.Store, notifier 
 		installed: map[string]bool{},
 		state:     "provisioning",
 	}
+	p.download = p.DownloadCatalog
+	p.retryBackoff = backoff
+	return p
 }
 
 // Start resolves the binary, scans installed catalogs, and — if none is installed —
@@ -168,16 +176,20 @@ func (p *Provisioner) Start(ctx context.Context) {
 	go p.autoDownloadDefault(ctx)
 }
 
-// autoDownloadDefault downloads the default catalog with a small bounded retry so a
-// transient network blip self-heals, alerting after downloadFailAlertAfter
-// consecutive failures so a persistent problem is visible.
+// autoDownloadDefault downloads the default catalog, retrying with a growing
+// backoff so a transient network blip self-heals. From downloadFailAlertAfter
+// consecutive failures on, a persistent problem is visible as one standing alert:
+// its message carries no attempt count or error (those are logged), so every
+// retry lands on the same row and an acknowledgement holds while it keeps
+// failing; a successful download resolves it (design architecture §10).
 func (p *Provisioner) autoDownloadDefault(ctx context.Context) {
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return
 		}
-		err := p.DownloadCatalog(ctx, defaultCatalog)
+		err := p.download(ctx, defaultCatalog)
 		if err == nil {
+			p.resolveDownloadAlert(ctx)
 			return
 		}
 		p.log.Warn("auto catalog download failed", "catalog", defaultCatalog, "attempt", attempt, "error", err)
@@ -185,15 +197,39 @@ func (p *Provisioner) autoDownloadDefault(ctx context.Context) {
 			p.notifier.Raise(ctx, model.Alert{
 				Severity: model.SeverityWarn,
 				Category: model.AlertConfig,
-				Message: fmt.Sprintf("Couldn't download the %s star catalog after %d attempts (%v) — plate solving is paused until it succeeds.",
-					defaultCatalog, attempt, err),
+				Message:  downloadAlertPrefix + "; plate solving is paused, and Commander keeps retrying. Check that it can reach the internet; the log has each attempt's error.",
+				Standing: true,
 			})
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff(attempt)):
+		case <-time.After(p.retryBackoff(attempt)):
 		}
+	}
+}
+
+// downloadAlertPrefix starts the auto-download failure alert's message, which is
+// how the alert is found among the fleet-wide config alerts to resolve it.
+const downloadAlertPrefix = "Couldn't download the " + defaultCatalog + " star catalog after repeated attempts"
+
+// resolveDownloadAlert resolves a standing auto-download failure alert once the
+// catalog has downloaded, and refreshes the badge.
+func (p *Provisioner) resolveDownloadAlert(ctx context.Context) {
+	if p.st == nil {
+		return
+	}
+	n, err := p.st.ResolveAlerts(ctx, "", model.AlertConfig, downloadAlertPrefix, time.Now().Unix())
+	if err != nil {
+		p.log.Warn("could not resolve the catalog download alert", "error", err)
+		return
+	}
+	if n == 0 {
+		return
+	}
+	p.log.Info("catalog downloaded; resolved its failure alert", "catalog", defaultCatalog)
+	if c, err := p.st.UnackedCount(ctx); err == nil && p.hub != nil {
+		p.hub.SetUnackedAlerts(c)
 	}
 }
 

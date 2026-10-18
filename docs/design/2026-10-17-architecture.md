@@ -1405,7 +1405,8 @@ logged at debug only. Four properties hold for every category:
 The standing raisers are `backlog`, `device_disk_low`, `nas_disk_low`,
 `destination_unavailable`, `unreachable`, `identity_unconfirmed`, `remote_stalled`, every
 remote-level alert, `library_unavailable`, `library_mismatch`, and the `config` alerts for an
-unreadable destination volume and for frames filed under no configured root. Two
+unreadable destination volume, for frames filed under no configured root, and for the default
+star catalog's auto-download failing repeatedly (resolved by the download that succeeds). Two
 per-cycle conditions stay events on purpose: `identity_mismatch` and `media_changed` are
 critical evidence that only a reset settles, and a standing row would silence a recurrence
 behind an old acknowledgement until that reset. While such a condition holds, acknowledging
@@ -1416,8 +1417,9 @@ Pinned by `TestRaiseAlertReportsWhetherItCreatedARow`,
 `TestStandingAlertStaysAcknowledgedWhileItsConditionPersists`,
 `TestStandingAlertStaysAcknowledgedAcrossReopen`, `TestStandingAlertRaisesAgainAfterResolve`
 (`internal/store`), `TestRaiseOfAStandingUnackedAlertDoesNotReannounce`,
-`TestRaiseAfterAckOfAPersistingConditionStaysQuiet` (`internal/notify`) and
-`TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears` (`internal/rig`).
+`TestRaiseAfterAckOfAPersistingConditionStaysQuiet` (`internal/notify`),
+`TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears` (`internal/rig`) and
+`TestAutoDownloadFailureAlertIsOneStandingAlert` (`internal/platesolve`).
 
 **Rejected alternatives.**
 
