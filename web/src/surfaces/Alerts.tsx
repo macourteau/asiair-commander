@@ -5,12 +5,15 @@
  * `alert.raised` event, whenever the snapshot's unacked count changes, and on a
  * stream reconnect (a dropped event self-heals — design architecture §8).
  *
+ * `?rig=` narrows the list to one rig (the Dashboard card's "Review" link), with
+ * a notice that says so and clears it.
+ *
  * After an Acknowledge, focus moves to the next alert's Acknowledge button, or to
  * the page heading when none remain, so a keyboard user is never dropped on the
  * page body when the acknowledged row's button disappears.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   api,
   ApiError,
@@ -30,7 +33,13 @@ import {
   useToast,
 } from "@/design";
 import { alertCategoryLabel } from "../util/labels";
-import { ackButtonLabel, alertFramesLink, nextAckFocus, rigDisplayName } from "../util/alerts";
+import {
+  ackButtonLabel,
+  alertFramesLink,
+  alertsForRig,
+  nextAckFocus,
+  rigDisplayName,
+} from "../util/alerts";
 import { absoluteTime, relativeTime } from "../util/format";
 import "./surfaces.css";
 
@@ -47,6 +56,11 @@ export function Alerts() {
   // an ack: a number, null for the heading, or undefined when nothing is pending.
   const [focusAfterAck, setFocusAfterAck] = useState<number | null | undefined>(undefined);
   const rigs = snapshot?.rigs ?? [];
+  const [params, setParams] = useSearchParams();
+  const rigFilter = params.get("rig") ?? "";
+  // Filtered client-side: the list is already capped and fetched whole, so a
+  // server-side filter would add an API parameter for no fewer bytes.
+  const shown = alerts ? alertsForRig(alerts, rigFilter) : null;
 
   const refetch = useCallback(
     async (signal?: AbortSignal) => {
@@ -91,7 +105,7 @@ export function Alerts() {
   const ack = useCallback(
     async (id: number) => {
       setAcking((prev) => new Set(prev).add(id));
-      const unackedIds = (alerts ?? []).filter((a) => a.acked_at === 0).map((a) => a.id);
+      const unackedIds = (shown ?? []).filter((a) => a.acked_at === 0).map((a) => a.id);
       try {
         await api.ackAlert(id);
         toast.success("Alert acknowledged.");
@@ -111,7 +125,7 @@ export function Alerts() {
         });
       }
     },
-    [alerts, refetch, toast],
+    [shown, refetch, toast],
   );
 
   // Runs after the post-ack list has rendered, so the target button exists (or the
@@ -148,6 +162,29 @@ export function Alerts() {
         />
       </div>
 
+      {rigFilter && (
+        <div className="notice tone-info" role="status" style={{ marginBottom: "var(--space-3)" }}>
+          <Icon name="info" size={18} />
+          <span className="grow">Showing only alerts for {rigDisplayName(rigFilter, rigs)}.</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              setParams(
+                (prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.delete("rig");
+                  return next;
+                },
+                { replace: true },
+              )
+            }
+          >
+            Show all alerts
+          </Button>
+        </div>
+      )}
+
       {error && (
         <Card pad>
           <p className="notice tone-problem" role="alert">
@@ -157,7 +194,7 @@ export function Alerts() {
         </Card>
       )}
 
-      {alerts == null ? (
+      {shown == null ? (
         // Until the first successful load resolves, show a spinner — unless a fetch
         // error is already surfaced above, in which case that notice stands alone.
         error ? null : (
@@ -165,21 +202,21 @@ export function Alerts() {
             <Spinner label="Loading alerts…" />
           </div>
         )
-      ) : alerts.length === 0 ? (
+      ) : shown.length === 0 ? (
         <Card pad>
           <EmptyState
             icon="safe"
             title={includeAcked ? "No alerts" : "Nothing needs attention"}
             description={
               includeAcked
-                ? "Commander hasn't raised any alerts."
-                : "There are no unacknowledged problems right now. Turn on “Show acknowledged” to see the history."
+                ? `Commander hasn't raised any alerts${rigFilter ? ` for ${rigDisplayName(rigFilter, rigs)}` : ""}.`
+                : `There are no unacknowledged problems${rigFilter ? ` on ${rigDisplayName(rigFilter, rigs)}` : ""} right now. Turn on “Show acknowledged” to see the history.`
             }
           />
         </Card>
       ) : (
         <ul className="alert-list list-reset" ref={listRef}>
-          {alerts.map((a) => (
+          {shown.map((a) => (
             <li key={a.id}>
               <AlertRow
                 alert={a}
@@ -210,7 +247,7 @@ function AlertRow({
   const sev = severityView(alert.severity);
   const acked = alert.acked_at !== 0;
   const category = alertCategoryLabel(alert.category);
-  const framesLink = alertFramesLink(alert);
+  const framesLink = alertFramesLink(alert, rigName ?? "");
   return (
     <Card
       as="article"
@@ -248,7 +285,9 @@ function AlertRow({
       <p className="alert-item__message">{alert.message}</p>
       {framesLink && (
         <p className="alert-item__message">
-          <Link to={framesLink}>Show these frames in History</Link>
+          <Link to={framesLink.to} aria-label={framesLink.label}>
+            {framesLink.text}
+          </Link>
         </p>
       )}
 

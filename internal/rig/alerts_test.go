@@ -55,6 +55,16 @@ func TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears(t *testing.T) {
 	if !strings.Contains(rows[0].Message, `"Test"`) {
 		t.Errorf("backlog message %q must name the rig by its display name", rows[0].Message)
 	}
+	// The message says what clears each kind, matching what the History view the
+	// alert links to offers: no promise of an action that does not exist.
+	for _, want := range []string{"reclassify or dismiss", "until a retry succeeds", "confirm their NAS copy"} {
+		if !strings.Contains(rows[0].Message, want) {
+			t.Errorf("backlog message %q lacks %q", rows[0].Message, want)
+		}
+	}
+	if strings.Contains(rows[0].Message, "fixed or dismissed") {
+		t.Errorf("backlog message %q promises a fix or dismissal for every frame", rows[0].Message)
+	}
 
 	if err := h.store.AckAlert(ctx, rows[0].ID, h.nowVal.Unix()); err != nil {
 		t.Fatal(err)

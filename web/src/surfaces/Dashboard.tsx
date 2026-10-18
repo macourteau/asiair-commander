@@ -30,6 +30,7 @@ import {
 import { rigStateView, safeToPowerOffView, showMonitoringPill } from "@/design";
 import { absoluteTime, formatBytes, formatUptime, relativeTime } from "../util/format";
 import { showSafeAsOf } from "../util/safeAsOf";
+import { rigAlertsLink } from "../util/alerts";
 import { TransferProgress } from "./TransferProgress";
 import { CleanupReadout } from "./CleanupReadout";
 import { isWorking } from "../util/rigActivity";
@@ -205,7 +206,7 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
             icon="alert"
             label={`${alerts.length} active ${alerts.length === 1 ? "alert" : "alerts"}`}
           />
-          <Link to="/alerts" className="text-sm">
+          <Link to={rigAlertsLink(rig.id)} className="text-sm">
             Review<span className="sr-only"> alerts for {rig.name}</span>
           </Link>
         </div>

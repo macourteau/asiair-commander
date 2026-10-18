@@ -1814,9 +1814,12 @@ confirmation remove the corrupt NAS copy and stop the frame counting toward the 
 
 The API answers 204 on success, 409 for a frame that is not unclassified, 404 for an unknown frame or
 rig, and 500 for anything else (a purge failure, a store error, a worker timeout), whose operator action
-is simply "retry". The web UI shows a trash button on each unclassified row; its confirmation says that
-dismissing removes the corrupt copy from the NAS, cannot be undone, and does not delete the file from the
-device. A dismissed frame renders as a muted "Dismissed" pill in the all-states views. Tests:
+is simply "retry". The web UI offers dismiss in two places, each confirming that dismissing removes the
+corrupt copy from the NAS, cannot be undone, and does not delete the file from the device: a trash button
+on each row of a rig's unclassified view in Devices, and the "Why it stays" dialog of an unclassified row
+in History's never-deletable view, which the backlog alert links to ([architecture
+§9.1](2026-10-17-architecture.md)). Neither offers it for a culled unclassified frame, whose device
+original leaves through the missing-frames panel and whose `dest_path` that deletion needs. A dismissed frame renders as a muted "Dismissed" pill in the all-states views. Tests:
 `TestDismissTombstonesAndPurges`, `TestDismissPurgeFailureLeavesUnclassified`,
 `TestDismissSucceedsWhenNASCopyAlreadyGone`, `TestDismissGuardsStateAndIsIdempotent`,
 `TestDismissSharedDestPathKeepsSiblingCopy`, `TestDismissClearsTransferHistorySurfaces`,

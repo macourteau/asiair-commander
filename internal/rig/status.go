@@ -276,8 +276,11 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 		// the (rig, category, message) dedup, flooding a new alert per poll. The
 		// Alerts page links the alert to exactly these frames (store
 		// ListNeverDeletable), where the count is.
-		msg := fmt.Sprintf("Some frames on %q can't be removed from the device automatically because they are "+
-			"unclassified, held or failed; they stay on it, using its space, until each one is fixed or dismissed.", profile.Name)
+		// Each kind is named with what actually clears it, so the message promises no
+		// action the linked History view does not offer (design architecture §10).
+		msg := fmt.Sprintf("Some frames on %q can't be removed from the device automatically, so they stay on it, "+
+			"using its space: unclassified frames until you reclassify or dismiss them, failed frames until a retry "+
+			"succeeds, and held frames until Commander can confirm their NAS copy.", profile.Name)
 		if profile.CapacityConstrained && deviceLow {
 			sev = model.SeverityCritical
 			msg = fmt.Sprintf(backlogCriticalPrefix+"%q: its device is low on free space, and some frames on it can't be "+

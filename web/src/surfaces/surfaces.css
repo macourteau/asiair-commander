@@ -318,6 +318,9 @@
   gap: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border);
+  /* A linked panel (/devices?rig=&show=) is scrolled to; clear the phone's fixed
+     top bar so its heading is not hidden under it. */
+  scroll-margin-top: calc(var(--topbar-height) + var(--space-3));
 }
 
 /* Live transfer feedback: the shared current-file progress plus a compact
