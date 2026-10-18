@@ -85,7 +85,9 @@ next version and dispatches `release.yml`, which builds the installer and **only
 publishes the release and builds the image. A tag pushed before a failed build would never get a
 release, and the next run would read it as the latest, dropping its commits from every later
 changelog; tagging last leaves nothing behind, so the next run retries the same version. Cut one
-on demand with `gh workflow run auto-release.yml`.
+on demand with `gh workflow run auto-release.yml`. A bad release is fixed forward with a new
+version; never delete-and-retag or move `:latest` to an older image, because watchtower would
+auto-downgrade installs into a store that refuses to open a schema newer than its binary.
 
 `update-astap-cli.yml` re-pins the ASTAP solver weekly (a PR for manual review) and mirrors the
 pinned zips to an `astap-cli-<version>` prerelease. **Never delete those prereleases**: SourceForge
