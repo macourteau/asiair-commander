@@ -2027,8 +2027,8 @@ publishes the counts as `RigStatus.DeviceFrames` (`device_frames`), and the SPA 
 
 | Field | Frames counted | What clears them |
 | --- | --- | --- |
-| `in_grace` | `verified`, not culled, `pulled_at` after the grace cutoff | the grace period ending, then the delete pass |
-| `due` | `verified`, not culled, grace elapsed | the next delete pass (§9, §12) |
+| `in_grace` | `verified` with a `sha256`, not culled, `pulled_at` after the grace cutoff | the grace period ending, then the delete pass |
+| `due` | `verified` with a `sha256`, not culled, grace elapsed: what the delete pass takes | the next delete pass (§9, §12) |
 | `culled` | `verified` or `unclassified` with a missing mark | the cull drain once grace and the settle window pass, or Restore ([library-reconciliation §9, §11](2026-10-17-library-reconciliation.md)) |
 | `stuck` | `held`, `failed`, and `unclassified` not culled | nothing automatic but a failed frame's successful retry; otherwise the operator acts on them from the backlog alert's list |
 | `kept` | on a `keep_originals` rig, what the first three would count | nothing: the rig never deletes |
@@ -2044,7 +2044,12 @@ recompute. Each bucket is a conditional aggregate over the
 rig's resident rows (`idx_frames_rig_state`), so the scan costs what a single count would and a
 poll runs no extra query and no per-frame work. The grace cutoff is the delete pass's own,
 `now − EffectiveGrace(profile)`, compared with `<=` as `DeletionEligible` does, so a frame moves
-from `in_grace` to `due` at the moment the delete pass would take it. The `stuck` bucket is the
+from `in_grace` to `due` at the moment the delete pass would take it. `due` is exactly
+`DeletionEligible`'s `verified` branch less culled rows (a `sha256` present, `pulled_at` set
+and at or before the cutoff), and `in_grace` is the same rows with `pulled_at` after it; a
+`verified` row missing its `sha256` or `pulled_at` lands in no bucket, as the delete pass can
+never take it either. A zero or negative grace is not a case the line handles: config
+validation forbids it for a deleting rig, and the delete pass refuses to run on one. The `stuck` bucket is the
 store's `neverDeletableWhere` clause itself, counted per row, so it always equals the backlog
 alert's condition and the total of History's `?view=never_deletable` list
 ([library-reconciliation §11.5](2026-10-17-library-reconciliation.md), I36). The other buckets
@@ -2091,10 +2096,13 @@ never crosses a remote tunnel. The SPA ships in the same binary, so `drain` is r
 than kept beside the counts.
 
 Tests: `TestDeviceBreakdown` (store: every bucket built through `UpsertFrame`, the grace boundary,
-the H12 pair, a failed row with no `dest_path`, culled `unclassified` outside `stuck`, and `stuck`
-equal to `ListNeverDeletable`'s total on the same rows); `TestDeviceFrames` (the pure derivation,
+the H12 pair, a failed row with no `dest_path`, culled `unclassified` outside `stuck`, `verified`
+rows without a `sha256` or `pulled_at` in no bucket, `due` equal to what `DeletionEligible` takes,
+and `stuck` equal to `ListNeverDeletable`'s total on the same rows); `TestDeviceFrames` (the pure derivation,
 including `drained` and keep-originals);
 `TestDeviceLineSeparatesStuckFromGrace` (worker: a held frame beside frames in grace);
+`TestDeviceLineGraceMatchesDeletePass` (worker: a frame turns due on the cycle whose delete
+pass takes it, not a second earlier);
 `TestDeviceLineCountsFailedFrames` (worker: a failed-only device is stuck, not hidden);
 `TestDismissBeforeListingKeepsUnchecked`; and vitest for the wording and the badge rule beside
 `web/src/util/drain.ts`.

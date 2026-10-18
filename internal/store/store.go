@@ -1576,9 +1576,12 @@ type DeviceCounts struct {
 // why each one stays, in one scan over idx_frames_rig_state (design
 // frame-lifecycle §14.5):
 //
-//   - InGrace and Due split the verified, not-culled frames at graceCutoff, which
-//     is the delete pass's own: pulled_at <= graceCutoff is due, exactly as
-//     DeletionEligible admits it.
+//   - InGrace and Due split the verified, not-culled frames that carry a sha256
+//     and a pulled_at at graceCutoff, which is the delete pass's own. Due is
+//     exactly DeletionEligible's verified branch (sha256 present, pulled_at not
+//     NULL and <= graceCutoff) minus culled rows; InGrace is the same rows with
+//     pulled_at > graceCutoff. A verified row missing either column is in no
+//     bucket, as the delete pass can never take it.
 //   - Culled is verified or unclassified with a missing mark, leaving through the
 //     cull drain whatever its grace.
 //   - Stuck is neverDeletableWhere itself, so it always equals the backlog alert's
@@ -1590,13 +1593,14 @@ type DeviceCounts struct {
 func (s *sqlStore) DeviceBreakdown(ctx context.Context, rigID string, graceCutoff int64) (DeviceCounts, error) {
 	placeholders, stateArgs := stateInClause(rigID, residentStates)
 	const filed = `dest_path IS NOT NULL AND dest_path != ''`
-	const kept = `state = 'verified' AND missing_seen_at IS NULL AND ` + filed
+	const deletable = `state = 'verified' AND missing_seen_at IS NULL AND ` + filed +
+		` AND sha256 IS NOT NULL AND sha256 <> '' AND pulled_at IS NOT NULL`
 	args := append([]any{graceCutoff, graceCutoff}, stateArgs...)
 	var c DeviceCounts
 	err := s.read.QueryRowContext(ctx,
 		`SELECT
-			COUNT(DISTINCT CASE WHEN `+kept+` AND pulled_at > ? THEN dest_path END),
-			COUNT(DISTINCT CASE WHEN `+kept+` AND COALESCE(pulled_at, 0) <= ? THEN dest_path END),
+			COUNT(DISTINCT CASE WHEN `+deletable+` AND pulled_at > ? THEN dest_path END),
+			COUNT(DISTINCT CASE WHEN `+deletable+` AND pulled_at <= ? THEN dest_path END),
 			COUNT(DISTINCT CASE WHEN state IN ('verified','unclassified') AND missing_seen_at IS NOT NULL
 				AND `+filed+` THEN dest_path END),
 			COALESCE(SUM(CASE WHEN `+neverDeletableWhere+` THEN 1 ELSE 0 END), 0)

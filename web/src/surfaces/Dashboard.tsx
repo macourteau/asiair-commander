@@ -195,7 +195,7 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
         <p className="rigcard__hero-help tone-problem">{rig.missing_warning}</p>
       )}
 
-      {/* Drain — a different fact from "safe" */}
+      {/* What is still on the device and why — a different fact from "safe" */}
       <DrainRow rig={rig} />
 
       {/* Active alerts (always visible on the glance) */}

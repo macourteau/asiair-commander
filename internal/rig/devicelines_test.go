@@ -107,3 +107,32 @@ func TestDismissBeforeListingKeepsUnchecked(t *testing.T) {
 		t.Fatalf("device frames = %+v after a dismiss before any listing, want nil (not checked yet)", got)
 	}
 }
+
+// TestDeviceLineGraceMatchesDeletePass pins the device line's grace cutoff to the
+// delete pass's: one second before the rig's grace elapses the frame is in grace
+// and stays on the device; at the second it elapses the cycle's status (published
+// before its delete pass) counts it due, and that same cycle's delete pass takes it.
+func TestDeviceLineGraceMatchesDeletePass(t *testing.T) {
+	h := newHarness(t, emmc, header.New())
+	f := fileLight(t, h, "Autorun/Light/o/Light_0001.fit")
+	grace := h.cfg.EffectiveGrace(h.cfg.Rig("rig-01"))
+	pulled := time.Unix(f.PulledAt, 0)
+
+	h.nowVal = pulled.Add(grace - time.Second)
+	h.cycle()
+	if got, want := h.status().DeviceFrames, (&model.DeviceFrames{InGrace: 1}); got == nil || *got != *want {
+		t.Fatalf("a second before grace elapses: device frames = %+v, want %+v", got, want)
+	}
+	if !h.deviceHas(f.SourcePath) {
+		t.Fatal("the delete pass took a frame still inside its grace period")
+	}
+
+	h.nowVal = pulled.Add(grace)
+	h.cycle()
+	if got, want := h.status().DeviceFrames, (&model.DeviceFrames{Due: 1}); got == nil || *got != *want {
+		t.Fatalf("as grace elapses: device frames = %+v, want %+v", got, want)
+	}
+	if h.deviceHas(f.SourcePath) {
+		t.Fatal("the line counted the frame due, but the same cycle's delete pass did not take it")
+	}
+}

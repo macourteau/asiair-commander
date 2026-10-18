@@ -531,9 +531,9 @@ func TestCountsDedupeByDestPath(t *testing.T) {
 	// Same dest_path on two shares (H12: USB + eMMC) → counts once.
 	shared := "C-2025 A6/NIGHT_1/light_007.fit"
 	seed := []*model.Frame{
-		{RigID: "r", SourceShare: "Udisk Images", SourcePath: "Autorun/light_007.fit", Size: 1, Mtime: 1, State: model.StateVerified, PulledAt: 2000, DestPath: shared},
-		{RigID: "r", SourceShare: "EMMC Images", SourcePath: "Autorun/light_007.fit", Size: 1, Mtime: 1, State: model.StateVerified, PulledAt: 2000, DestPath: shared},
-		{RigID: "r", SourceShare: "Udisk Images", SourcePath: "Autorun/light_008.fit", Size: 1, Mtime: 1, State: model.StateVerified, PulledAt: 2000, DestPath: "other.fit"},
+		{RigID: "r", SourceShare: "Udisk Images", SourcePath: "Autorun/light_007.fit", Size: 1, Mtime: 1, SHA256: "aa", State: model.StateVerified, PulledAt: 2000, DestPath: shared},
+		{RigID: "r", SourceShare: "EMMC Images", SourcePath: "Autorun/light_007.fit", Size: 1, Mtime: 1, SHA256: "aa", State: model.StateVerified, PulledAt: 2000, DestPath: shared},
+		{RigID: "r", SourceShare: "Udisk Images", SourcePath: "Autorun/light_008.fit", Size: 1, Mtime: 1, SHA256: "aa", State: model.StateVerified, PulledAt: 2000, DestPath: "other.fit"},
 		// deleted → not resident, but was pulled tonight
 		{RigID: "r", SourceShare: "Udisk Images", SourcePath: "Autorun/old.fit", Size: 1, Mtime: 1, State: model.StateDeleted, PulledAt: 2000, DestPath: "old.fit"},
 	}
@@ -588,6 +588,11 @@ func TestDeviceBreakdown(t *testing.T) {
 		row("EMMC Images", "Autorun/u.fit", model.StateUnclassified, cutoff-50, "u.fit"),
 		row("EMMC Images", "Autorun/h.fit", model.StateHeld, cutoff-50, "h.fit"),
 		{RigID: "r", SourceShare: "EMMC Images", SourcePath: "Autorun/f.fit", Size: 1, Mtime: 1, State: model.StateFailed},
+		// Verified rows the delete pass can never take land in no bucket: no
+		// sha256, and no pulled_at.
+		{RigID: "r", SourceShare: "EMMC Images", SourcePath: "Autorun/nosha.fit", Size: 1, Mtime: 1,
+			State: model.StateVerified, PulledAt: cutoff - 50, DestPath: "nosha.fit"},
+		row("EMMC Images", "Autorun/nopull.fit", model.StateVerified, 0, "nopull.fit"),
 		// Not on the device, or another rig's.
 		row("EMMC Images", "Autorun/x.fit", model.StateDeleted, cutoff-50, "x.fit"),
 		row("EMMC Images", "Autorun/z.fit", model.StateDismissed, 0, ""),
@@ -617,6 +622,21 @@ func TestDeviceBreakdown(t *testing.T) {
 	// The stuck count and the backlog alert's list come from one predicate.
 	if _, total, err := s.ListNeverDeletable(ctx, "r", 0, 50); err != nil || total != got.Stuck {
 		t.Fatalf("ListNeverDeletable total = %d (err %v), want the stuck count %d", total, err, got.Stuck)
+	}
+
+	// Due is exactly what the delete pass takes, culled rows aside.
+	eligible, err := s.DeletionEligible(ctx, "r", cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dues := map[string]bool{}
+	for _, f := range eligible {
+		if f.MissingSeenAt == 0 {
+			dues[f.DestPath] = true
+		}
+	}
+	if len(dues) != got.Due {
+		t.Fatalf("DeletionEligible takes %d not-culled frames %v, want the due count %d", len(dues), dues, got.Due)
 	}
 
 	// A frame moves from in grace to due at the moment the delete pass would take it.
