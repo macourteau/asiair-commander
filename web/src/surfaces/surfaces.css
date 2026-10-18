@@ -772,12 +772,16 @@
   padding: 0;
   overflow: hidden;
 }
+/* Every row is its own grid, so a column cannot grow to fit its widest cell: the
+ * status minimum is sized for the longest frame-state pill ("Archived · removed
+ * from device"), and the device and source columns, which truncate, give up the
+ * width, keeping the row's minimum inside a 1440px-wide desktop. */
 .feed-head,
 .feed-row {
   display: grid;
   grid-template-columns:
-    56px minmax(96px, 0.9fr) minmax(120px, 1.8fr) 64px 84px
-    minmax(140px, 1fr) 72px minmax(150px, 1.1fr) 96px 40px;
+    56px minmax(88px, 0.9fr) minmax(88px, 1.8fr) 64px 84px
+    minmax(140px, 1fr) 72px minmax(244px, 1.1fr) 96px 40px;
   gap: var(--space-3);
   align-items: center;
   padding: 0 var(--space-3);

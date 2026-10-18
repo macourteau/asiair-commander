@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { rigStateView, safeToPowerOffView, showMonitoringPill } from "./status";
+import {
+  frameStateView,
+  rigStateView,
+  safeToPowerOffView,
+  showMonitoringPill,
+} from "./status";
 
 describe("rigStateView", () => {
   it("appends a pending note only while the requested state disagrees with the published one", () => {
@@ -84,5 +89,19 @@ describe("safeToPowerOffView — remote", () => {
     const view = safeToPowerOffView("unknown", "remote");
     expect(view.label).toBe("Unknown — don't rely on this");
     expect(view.help).toMatch(/remote this rig is reached through isn't connected/);
+  });
+});
+
+describe("frameStateView", () => {
+  // A frame whose device original was removed must never read as a lost photo:
+  // every post-verification label leads with the archive, then says where the
+  // device original stands.
+  it("labels verified frames by the archive, not the deletion", () => {
+    expect(frameStateView("verified").label).toBe("Archived · on device");
+    expect(frameStateView("verified", { onHold: true }).label).toBe(
+      "Archived · kept on device",
+    );
+    expect(frameStateView("deleted").label).toBe("Archived · removed from device");
+    expect(frameStateView("deleted").tone).toBe("safe");
   });
 });

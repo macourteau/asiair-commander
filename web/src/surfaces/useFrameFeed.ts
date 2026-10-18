@@ -355,7 +355,7 @@ export function useFrameFeed({ rigId }: { rigId?: string } = {}): UseFrameFeed {
   // A completion event carries the frame's own persisted state (frame.done can be
   // verified OR unclassified; failed → failed; deleted → deleted), so terminalState
   // is taken from the frame, never a fixed label. allowCreate is false only for
-  // frame.deleted: never prepend a "Deleted" row for a frame the operator never
+  // frame.deleted: never prepend a removed-from-device row for a frame the operator never
   // saw arrive (one that aged out of the window).
   const onTerminal = useCallback(
     (allowCreate: boolean) => (data: unknown) => {

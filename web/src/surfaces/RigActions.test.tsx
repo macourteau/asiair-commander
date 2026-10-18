@@ -19,11 +19,12 @@ describe("RigActions", () => {
         onResume={noop}
         onRunNow={noop}
         onStopRun={noop}
+        rigName="Alpha"
       />,
     );
-    expect(screen.getByText("Resume")).toBeTruthy();
-    expect(screen.getByText("Stop run")).toBeTruthy();
-    expect(screen.queryByText("Run now")).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume copying from Alpha" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop run on Alpha" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run now on Alpha" })).toBeNull();
   });
 
   it("disables Stop run and reads Stopping… while a stop is pending", () => {
@@ -37,11 +38,12 @@ describe("RigActions", () => {
         onResume={noop}
         onRunNow={noop}
         onStopRun={noop}
+        rigName="Alpha"
       />,
     );
     const btn = screen.getByText("Stopping…").closest("button");
     expect(btn?.disabled).toBe(true);
-    expect(screen.queryByText("Stop run")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop run on Alpha" })).toBeNull();
   });
 
   it("shows Paused with no Stop run once the run flag clears", () => {
@@ -55,11 +57,12 @@ describe("RigActions", () => {
         onResume={noop}
         onRunNow={noop}
         onStopRun={noop}
+        rigName="Alpha"
       />,
     );
-    expect(screen.getByText("Resume")).toBeTruthy();
-    expect(screen.getByText("Run now")).toBeTruthy();
-    expect(screen.queryByText("Stop run")).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume copying from Alpha" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run now on Alpha" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop run on Alpha" })).toBeNull();
     expect(screen.queryByText("Stopping…")).toBeNull();
   });
 
@@ -75,9 +78,10 @@ describe("RigActions", () => {
         onResume={onResume}
         onRunNow={noop}
         onStopRun={noop}
+        rigName="Alpha"
       />,
     );
-    const btn = screen.getByText("Cancel pause");
+    const btn = screen.getByRole("button", { name: "Cancel pause for Alpha" });
     fireEvent.click(btn);
     expect(onResume).toHaveBeenCalledOnce();
   });
@@ -93,9 +97,10 @@ describe("RigActions", () => {
         onResume={noop}
         onRunNow={noop}
         onStopRun={noop}
+        rigName="Alpha"
       />,
     );
-    expect(screen.getByText("Pause")).toBeTruthy();
-    expect(screen.getByText("Run now")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pause copying from Alpha" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run now on Alpha" })).toBeTruthy();
   });
 });

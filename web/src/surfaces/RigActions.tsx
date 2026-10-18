@@ -23,6 +23,9 @@ export interface RigActionsProps {
   onResume: () => void;
   onRunNow: () => void;
   onStopRun: () => void;
+  /** The rig's display name, read to screen readers after each button's verb so a
+   * list of cards does not announce a run of identical "Pause copying" buttons. */
+  rigName: string;
 }
 
 export function RigActions({
@@ -34,6 +37,7 @@ export function RigActions({
   onResume,
   onRunNow,
   onStopRun,
+  rigName,
 }: RigActionsProps) {
   // A pause queued but not yet applied: offer to take it back rather than a
   // second Pause that would queue another one. Never true during a run — Stop
@@ -53,7 +57,7 @@ export function RigActions({
           loading={busy === "resume"}
           onClick={onResume}
         >
-          Cancel pause
+          Cancel pause{" "}<span className="sr-only">for {rigName}</span>
         </Button>
       ) : paused ? (
         <Button
@@ -63,7 +67,7 @@ export function RigActions({
           loading={busy === "resume"}
           onClick={onResume}
         >
-          Resume
+          Resume copying{" "}<span className="sr-only">from {rigName}</span>
         </Button>
       ) : (
         <Button
@@ -73,7 +77,7 @@ export function RigActions({
           loading={busy === "pause"}
           onClick={onPause}
         >
-          Pause
+          Pause copying{" "}<span className="sr-only">from {rigName}</span>
         </Button>
       )}
       {runUntilIdle &&
@@ -89,7 +93,7 @@ export function RigActions({
             loading={busy === "stop"}
             onClick={onStopRun}
           >
-            Stop run
+            Stop run{" "}<span className="sr-only">on {rigName}</span>
           </Button>
         ))}
       {!runUntilIdle && (
@@ -100,7 +104,7 @@ export function RigActions({
           loading={busy === "run"}
           onClick={onRunNow}
         >
-          Run now
+          Run now{" "}<span className="sr-only">on {rigName}</span>
         </Button>
       )}
     </>

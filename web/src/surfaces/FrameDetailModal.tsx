@@ -101,7 +101,7 @@ export function FrameDetailModal({
         <Section legend="Timeline">
           {frame.mtime > 0 && <Row label="Modified">{absoluteTime(frame.mtime)}</Row>}
           {!!frame.pulled_at && <Row label="Transferred">{absoluteTime(frame.pulled_at)}</Row>}
-          {!!frame.deleted_at && <Row label="Deleted">{absoluteTime(frame.deleted_at)}</Row>}
+          {!!frame.deleted_at && <Row label="Removed from device">{absoluteTime(frame.deleted_at)}</Row>}
           {frame.attempts > 0 && <Row label="Attempts">{frame.attempts}</Row>}
           {!!frame.next_retry_at && (
             <Row label="Next retry">{absoluteTime(frame.next_retry_at)}</Row>

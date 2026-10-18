@@ -191,13 +191,16 @@ export function showMonitoringPill(
 }
 
 /**
- * A frame's lifecycle state as a friendly, color+icon+text status. A `verified`
- * frame is copied and checked but still on the device (kept until its grace
- * elapses), so it reads as "Pending deletion"; `deleted` is the cleared end state.
+ * A frame's lifecycle state as a friendly, color+icon+text status. Every label
+ * that follows a verified copy leads with "Archived", so a `deleted` frame (the
+ * device original removed after its NAS copy was verified) never reads as "my
+ * photo is gone". A `verified` frame is copied and checked but still on the
+ * device (kept until its grace elapses): "Archived · on device"; `deleted` is the
+ * cleared end state: "Archived · removed from device".
  *
  * When `onHold` is set, a still-on-device verified frame belongs to a rig with
  * keep-originals turned on, so it will never be deleted while that stays on; it
- * reads as "Deletion on hold" instead of "Pending deletion".
+ * reads as "Archived · kept on device" instead.
  */
 export function frameStateView(
   state: FrameState,
@@ -209,22 +212,22 @@ export function frameStateView(
         return {
           tone: "neutral",
           icon: "clock",
-          label: "Deletion on hold",
+          label: "Archived · kept on device",
           help: "Copied and verified on the NAS. This rig keeps originals, so the device copy is held and won't be deleted until you turn that off.",
         };
       }
       return {
         tone: "working",
         icon: "clock",
-        label: "Pending deletion",
+        label: "Archived · on device",
         help: "Copied and verified on the NAS. The original stays on the device until its grace period elapses, then it's deleted.",
       };
     case "deleted":
       return {
         tone: "safe",
         icon: "safe",
-        label: "Deleted",
-        help: "Copied, verified, and the original removed from the device.",
+        label: "Archived · removed from device",
+        help: "Copied and verified on the NAS, then the original was removed from the device. Your archived copy is safe.",
       };
     case "unclassified":
       return {

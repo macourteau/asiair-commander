@@ -561,7 +561,7 @@ export function Settings() {
               <Field
                 label="Keep this much free on the NAS (GiB)"
                 help="Commander stops filling the destination once free space drops to this."
-                example={`${diskGiB || "0"} GiB = ${formatBytes(diskBytes)}`}
+                note={`${diskGiB || "0"} GiB = ${formatBytes(diskBytes)}`}
               >
                 {(f) => (
                   <TextInput {...f} mono inputMode="decimal" value={diskGiB}
@@ -621,7 +621,6 @@ export function Settings() {
             <Field
               label="Solve light frames"
               help="Compute each light frame's WCS from its stars. Takes effect after a restart."
-              example={config.plate_solve_enabled ? "On" : "Off"}
             >
               {(f) => (
                 <Toggle
@@ -697,7 +696,6 @@ export function Settings() {
           <Field
             label="Check for new releases"
             help="Makes one request an hour to api.github.com and, when a newer release exists, shows a link next to the version in the menu. Applies as soon as you save."
-            example={config.update_check_disabled ? "Off" : "On"}
           >
             {(f) => (
               <Toggle
