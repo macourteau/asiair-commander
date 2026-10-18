@@ -1375,7 +1375,7 @@ These hold on every surface and are requirements on the copy, not decoration:
 persists the row and, **only when that created a new row**, emits `alert.raised` (which the
 SPA toasts and announces to screen readers), records `alerts_raised_total`, logs it and
 refreshes the badge. A raise absorbed by an existing row is the same alert seen again and is
-logged at debug only. Four properties hold for every category:
+logged at debug only. Five properties hold for every category:
 
 - **Deduplication.** The store collapses an identical `(rig_id, category, message)` tuple
   that still stands onto the existing row and reports that nothing was created. Messages
@@ -1394,13 +1394,23 @@ logged at debug only. Four properties hold for every category:
   raised **fleet-wide** with a NULL `rig_id`, so one unmounted volume is one row however many
   rigs observe it. A remote-level alert names its remote in a fixed message prefix, so it is
   found again after a rename.
-- **Resolve on the resolving transition.** A condition that clears resolves its standing
-  alert once, on the cycle it resolves (fleet-scoped conditions through a fleet-scoped
-  helper; a category that carries several conditions, `config` and the library roots, by
-  message prefix), acknowledging it if the operator had not, so a healthy rig never touches
-  the alert table every cycle and no warning stands forever after its cause is gone. Where a
-  latch gates this, it starts "raised", so the first clear cycle after a restart retires a
-  row a previous process left.
+- **Resolve when the condition clears.** A condition that clears resolves its standing
+  alert (fleet-scoped conditions through a fleet-scoped helper; a category or alert that
+  carries several conditions — `config`, the library roots, the backlog's "capture may stop"
+  escalation — by message prefix), acknowledging it if the operator had not, so no warning
+  stands forever after its cause is gone. Some resolves are latched to the clearing
+  transition (`backlogRaised`, `deviceLowRaised`, `stallRaised`, each starting "raised" so
+  the first clear cycle after a restart retires a row a previous process left); the rest run
+  on every clear cycle. Those are not latched because a fleet-wide row may have been raised
+  by another worker, whose latch this one cannot see, so a latch could strand it. Instead
+  `ResolveAlerts` answers the common nothing-to-resolve case with a read on the read
+  connection and takes the write connection only when an unresolved row matches, so a
+  healthy rig adds a few small reads of the alerts table per cycle and no writes. The escalated backlog
+  row is resolved whenever the escalation is not in effect, so each later onset is a new,
+  announced critical; a library root's alerts are also resolved once the root is no longer
+  configured, since it will never confirm again.
+- **Atomic raise.** The dedup check and the insert are one transaction, so workers raising
+  one fleet-wide condition at the same moment create one row and announce it once.
 
 The standing raisers are `backlog`, `device_disk_low`, `nas_disk_low`,
 `destination_unavailable`, `unreachable`, `identity_unconfirmed`, `remote_stalled`, every
@@ -1418,7 +1428,9 @@ Pinned by `TestRaiseAlertReportsWhetherItCreatedARow`,
 `TestStandingAlertStaysAcknowledgedAcrossReopen`, `TestStandingAlertRaisesAgainAfterResolve`
 (`internal/store`), `TestRaiseOfAStandingUnackedAlertDoesNotReannounce`,
 `TestRaiseAfterAckOfAPersistingConditionStaysQuiet` (`internal/notify`),
-`TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears` (`internal/rig`) and
+`TestBacklogAlertStaysAcknowledgedUntilTheBacklogClears`, `TestBacklogCriticalAnnouncesEachOnset`,
+`TestRootAlertsOfARemovedRootAreResolved` (`internal/rig`),
+`TestConcurrentRaisesOfOneAlertCreateOneRow` (`internal/store`) and
 `TestAutoDownloadFailureAlertIsOneStandingAlert` (`internal/platesolve`).
 
 **Rejected alternatives.**

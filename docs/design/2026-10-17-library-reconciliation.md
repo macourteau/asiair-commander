@@ -726,7 +726,8 @@ keyed per root to match `libraryid:`: the first rig to cross the threshold raise
 successful confirmation clears the record. `library_unavailable` and `library_mismatch` are standing
 alerts ([architecture §10](2026-10-17-architecture.md)): a root's successful confirmation resolves
 the confirming rig's alerts **for that root**, matched by the root in the message prefix, never by
-category, which would let one root recovering retire another root's live alert.
+category, which would let one root recovering retire another root's live alert. Each scan also
+resolves the rig's root alerts for roots no longer configured, which will never confirm.
 `library_reconciled` is an event and is never auto-acknowledged. `frame_lost` keeps its
 meaning (no copy provably exists anywhere) and is raised at warn for a both-sides cull (§4.4). A
 repointed root's orphaned rows raise `config` at warn (§4.3).

@@ -280,8 +280,13 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 			"unclassified, held or failed; they stay on it, using its space, until each one is fixed or dismissed.", profile.Name)
 		if profile.CapacityConstrained && deviceLow {
 			sev = model.SeverityCritical
-			msg = fmt.Sprintf("Capture may stop on %q: its device is low on free space, and some frames on it can't be "+
+			msg = fmt.Sprintf(backlogCriticalPrefix+"%q: its device is low on free space, and some frames on it can't be "+
 				"removed automatically because they are unclassified, held or failed.", profile.Name)
+		} else {
+			// The escalation is over while the backlog remains: resolve the critical
+			// row on its own, or the next onset would land on it (acknowledged or
+			// not) and go unannounced.
+			w.resolveAlertsByPrefix(ctx, model.AlertBacklog, backlogCriticalPrefix)
 		}
 		w.notify.Raise(ctx, model.Alert{
 			RigID:    w.profileID,
@@ -318,6 +323,10 @@ func (w *Worker) checkBacklogAndCapacity(ctx context.Context, cfg *model.Config,
 		w.deviceLowRaised = false
 	}
 }
+
+// backlogCriticalPrefix starts the escalated backlog alert's message, which is how
+// it is resolved apart from the warn-level backlog alert of the same rig.
+const backlogCriticalPrefix = "Capture may stop on "
 
 // countNeverDeletable counts the rig's frames that are never removed from the
 // device — the driver of the backlog alert. The predicate lives in the store

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/macourteau/asiair-commander/internal/header"
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/netsite"
+	"github.com/macourteau/asiair-commander/internal/notify"
 	"github.com/macourteau/asiair-commander/internal/store"
 )
 
@@ -302,7 +304,7 @@ var errLink = &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection r
 
 // TestRemoteStalledProgressAlert (design remote-sites AC27): a remote rig whose
 // deletes keep failing with its tunnel up raises one Warn alert naming its
-// remote and counting the blocked deletes, once, after stallPasses passes;
+// remote, once, after stallPasses passes, with the blocked deletes logged;
 // passes cut by the tunnel going down never count; the next success
 // acknowledges it.
 func TestRemoteStalledProgressAlert(t *testing.T) {
@@ -351,8 +353,8 @@ func TestRemoteStalledProgressAlert(t *testing.T) {
 	}
 	a := got[0]
 	if a.Severity != model.SeverityWarn || a.RigID != "rig-01" || !strings.Contains(a.Message, `"Backyard"`) ||
-		!strings.Contains(a.Message, "6 delete attempts blocked") {
-		t.Fatalf("alert %+v, want a Warn on rig-01 naming Backyard and the 6 blocked deletes of two frames over three passes", a)
+		!strings.Contains(h.logBuf.String(), "deletes_blocked=6") {
+		t.Fatalf("alert %+v, want a Warn on rig-01 naming Backyard, with the 6 blocked deletes of two frames over three passes logged", a)
 	}
 
 	// The next success acknowledges it.
@@ -470,8 +472,8 @@ func TestRemoteHashFailureCountsAsStall(t *testing.T) {
 			got = append(got, a)
 		}
 	}
-	if len(got) != 1 || !strings.Contains(got[0].Message, "6 delete attempts blocked") {
-		t.Fatalf("stalled alerts %+v, want one counting the 6 blocked deletes of two frames over three passes", got)
+	if len(got) != 1 || !strings.Contains(h.logBuf.String(), "deletes_blocked=6") {
+		t.Fatalf("stalled alerts %+v, want one, with the 6 blocked deletes of two frames over three passes logged", got)
 	}
 	for _, f := range frames {
 		if !h.deviceHas(f.SourcePath) {
@@ -609,4 +611,42 @@ func (h *harness) unacked(t *testing.T, id int64) bool {
 		}
 	}
 	return false
+}
+
+// The stalled alert is standing, so its message must not carry a count that
+// differs between episodes: a later episode of the same stall (after a restart
+// resets the in-memory count, say) would otherwise be a new alert past the
+// operator's acknowledgement.
+func TestRemoteStalledAlertMessageIsStableAcrossEpisodes(t *testing.T) {
+	h, _, _ := remoteHarness(t)
+	h.w.notify = notify.New(h.store, h.hub, nil, nil)
+	h.seedEligible(t, 2)
+	h.dev.FailOpen(emmc, errLink)
+	for range stallPasses {
+		h.cycle()
+	}
+	all, _ := h.store.ListAlerts(context.Background(), false, 0)
+	if !slices.ContainsFunc(all, func(a model.Alert) bool { return a.Category == model.AlertRemoteStalled }) {
+		t.Fatalf("unacked alerts = %+v, want the stalled alert among them", all)
+	}
+	for _, a := range all {
+		if err := h.store.AckAlert(context.Background(), a.ID, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A new process: the episode's counts start over from different values.
+	h.w.stallPasses, h.w.stallBlocked = 0, 10
+	for range stallPasses {
+		h.cycle()
+	}
+	rows, _ := h.store.ListAlerts(context.Background(), true, 0)
+	stalled := 0
+	for _, a := range rows {
+		if a.Category == model.AlertRemoteStalled {
+			stalled++
+		}
+	}
+	if stalled != 1 {
+		t.Fatalf("stalled rows after a second episode of the same stall = %d, want 1 (acknowledged)", stalled)
+	}
 }

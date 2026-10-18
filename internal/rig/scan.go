@@ -63,6 +63,7 @@ func (w *Worker) scanLibrary(ctx context.Context, cfg *model.Config, profile *mo
 	}
 	roots := scanRoots(cfg)
 	res := model.LibraryScanResult{At: w.now().Unix()}
+	w.resolveRemovedRootAlerts(ctx, roots)
 
 	// Rows whose dest_path falls under no configured root are invisible to the
 	// per-root walk; report them so a repointed root does not silently orphan them.
@@ -265,6 +266,36 @@ func libraryMismatchPrefix(root string) string {
 	return "a different library is mounted at destination root " + root + ";"
 }
 func libraryUnavailablePrefix(root string) string { return "destination root " + root + " is " }
+
+// resolveRemovedRootAlerts resolves this rig's root alerts for roots no longer
+// configured. A root alert is resolved when its root confirms, which a removed
+// root never does; left standing, it would silence the same fault after the root
+// is re-added (design architecture §10).
+func (w *Worker) resolveRemovedRootAlerts(ctx context.Context, roots []string) {
+	for _, c := range []struct {
+		category model.Category
+		prefix   func(string) string
+	}{
+		{model.AlertLibraryMismatch, libraryMismatchPrefix},
+		{model.AlertLibraryUnavailable, libraryUnavailablePrefix},
+	} {
+		keep := make([]string, 0, len(roots))
+		for _, r := range roots {
+			keep = append(keep, c.prefix(r))
+		}
+		n, err := w.store.ResolveAlertsExcept(ctx, w.profileID, c.category, keep, w.now().Unix())
+		if err != nil {
+			w.log.Warn("rig: could not resolve alerts of removed library roots", "category", c.category, "error", err)
+			continue
+		}
+		if n > 0 {
+			w.log.Info("rig: resolved alerts of library roots no longer configured", "category", c.category, "count", n)
+			if u, err := w.store.UnackedCount(ctx); err == nil {
+				w.hub.SetUnackedAlerts(u)
+			}
+		}
+	}
+}
 
 // rootUnavailableKey is the per-root meta key tracking a first-failure time.
 func rootUnavailableKey(root string) string { return "rootunavail:" + RootKey(root) }

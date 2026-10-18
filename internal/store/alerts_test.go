@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/macourteau/asiair-commander/internal/model"
@@ -290,5 +292,35 @@ func TestListNeverDeletable(t *testing.T) {
 	}
 	if _, total, _ := s.ListNeverDeletable(ctx, "", 0, 50); total != 4 {
 		t.Fatalf("fleet-wide total = %d, want 4", total)
+	}
+}
+
+// Several workers observe one fleet-wide condition at once. The dedup check and
+// the insert must be one step, or two raisers both create a row and both announce.
+func TestConcurrentRaisesOfOneAlertCreateOneRow(t *testing.T) {
+	for round := range 20 {
+		s := newStore(t)
+		a := model.Alert{Severity: model.SeverityWarn, Category: model.AlertNASDiskLow, Message: "low", CreatedAt: 1, Standing: true}
+		const n = 16
+		var wg sync.WaitGroup
+		var created atomic.Int32
+		start := make(chan struct{})
+		for range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if _, c, err := s.RaiseAlert(context.Background(), a); err != nil {
+					t.Error(err)
+				} else if c {
+					created.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if rows := alertRows(t, s); rows != 1 || created.Load() != 1 {
+			t.Fatalf("round %d: rows = %d, created = %d; want 1 and 1", round, rows, created.Load())
+		}
 	}
 }

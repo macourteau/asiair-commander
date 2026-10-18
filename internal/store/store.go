@@ -198,6 +198,7 @@ type Store interface {
 	// Alerts (design architecture §10).
 	RaiseAlert(ctx context.Context, a model.Alert) (id int64, created bool, err error)
 	ResolveAlerts(ctx context.Context, rigID string, category model.Category, messagePrefix string, at int64) (int, error)
+	ResolveAlertsExcept(ctx context.Context, rigID string, category model.Category, keepPrefixes []string, at int64) (int, error)
 	ListAlerts(ctx context.Context, includeAcked bool, limit int) ([]model.Alert, error)
 	AckAlert(ctx context.Context, id int64, at int64) error
 	UnackedCount(ctx context.Context) (int, error)
@@ -2509,13 +2510,22 @@ func (s *sqlStore) RebuildNightCounters(ctx context.Context, entries []NightEntr
 // same problem happening after an acknowledgement is raised again; for a standing
 // condition (a.Standing) it is a row not yet resolved, acknowledged or not, so an
 // acknowledgement holds until the condition's owner resolves it.
+//
+// The check and the insert are one transaction: workers observing one fleet-wide
+// condition raise it concurrently, and two that both found no row would both
+// create one and both announce it.
 func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, error) {
 	open := `acked_at IS NULL`
 	if a.Standing {
 		open = `resolved_at IS NULL`
 	}
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, fmt.Errorf("raise alert begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	var existing int64
-	err := s.write.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT id FROM alerts
 		 WHERE rig_id IS ? AND category=? AND message=? AND `+open+`
 		 ORDER BY id DESC LIMIT 1`,
@@ -2527,7 +2537,7 @@ func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, 
 		return 0, false, fmt.Errorf("dedup-check alert: %w", err)
 	}
 
-	res, err := s.write.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO alerts(rig_id, severity, category, message, created_at, acked_at)
 		 VALUES (?,?,?,?,?,?)`,
 		nullStr(a.RigID), string(a.Severity), string(a.Category), a.Message, a.CreatedAt, nullInt(a.AckedAt))
@@ -2537,6 +2547,9 @@ func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, 
 	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, fmt.Errorf("raise alert commit: %w", err)
 	}
 	return id, true, nil
 }
@@ -2548,12 +2561,40 @@ func (s *sqlStore) RaiseAlert(ctx context.Context, a model.Alert) (int64, bool, 
 // standing raise, so the condition raises anew if it returns. It returns the
 // number of rows resolved.
 func (s *sqlStore) ResolveAlerts(ctx context.Context, rigID string, category model.Category, messagePrefix string, at int64) (int, error) {
+	return s.resolveAlerts(ctx, at, `rig_id IS ? AND category=? AND substr(message, 1, ?)=?`,
+		nullStr(rigID), string(category), len([]rune(messagePrefix)), messagePrefix)
+}
+
+// ResolveAlertsExcept resolves, like ResolveAlerts, the rig's unresolved alerts of
+// the category whose message starts with none of keepPrefixes: the alerts of a
+// subject that no longer exists, such as a library root removed from the config.
+func (s *sqlStore) ResolveAlertsExcept(ctx context.Context, rigID string, category model.Category, keepPrefixes []string, at int64) (int, error) {
+	where := `rig_id IS ? AND category=?`
+	args := []any{nullStr(rigID), string(category)}
+	for _, p := range keepPrefixes {
+		where += ` AND substr(message, 1, ?)<>?`
+		args = append(args, len([]rune(p)), p)
+	}
+	return s.resolveAlerts(ctx, at, where, args...)
+}
+
+// resolveAlerts resolves the unresolved alerts matching where. Resolve paths run
+// on every healthy cycle, so the common nothing-to-resolve case is answered by a
+// read and never takes the write connection.
+func (s *sqlStore) resolveAlerts(ctx context.Context, at int64, where string, args ...any) (int, error) {
+	where += ` AND resolved_at IS NULL`
+	var found int
+	if err := s.read.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM alerts WHERE `+where+`)`, args...).Scan(&found); err != nil {
+		return 0, fmt.Errorf("check alerts to resolve: %w", err)
+	}
+	if found == 0 {
+		return 0, nil
+	}
 	res, err := s.write.ExecContext(ctx,
-		`UPDATE alerts SET resolved_at=?, acked_at=COALESCE(acked_at, ?)
-		 WHERE rig_id IS ? AND category=? AND resolved_at IS NULL AND substr(message, 1, ?)=?`,
-		at, at, nullStr(rigID), string(category), len([]rune(messagePrefix)), messagePrefix)
+		`UPDATE alerts SET resolved_at=?, acked_at=COALESCE(acked_at, ?) WHERE `+where,
+		append([]any{at, at}, args...)...)
 	if err != nil {
-		return 0, fmt.Errorf("resolve %s alerts: %w", category, err)
+		return 0, fmt.Errorf("resolve alerts: %w", err)
 	}
 	n, err := res.RowsAffected()
 	return int(n), err
