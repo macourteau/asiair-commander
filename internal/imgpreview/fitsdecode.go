@@ -65,28 +65,32 @@ func decode(hdr header.Reader, path string) (*decoded, error) {
 		return nil, transErr(fmt.Errorf("preview: read header %s: %w", path, err))
 	}
 
-	bitpix, ok := h.Int("BITPIX")
-	if !ok || !validBitpix(int(bitpix)) {
+	bitpix64, ok := h.Int("BITPIX")
+	bitpix, inRange := int32Of(bitpix64)
+	if !ok || !inRange || !validBitpix(bitpix) {
 		return nil, detErr("preview: unsupported BITPIX %v", h)
 	}
 	naxis, _ := h.Int("NAXIS")
-	w, wok := h.Int("NAXIS1")
-	ht, hok := h.Int("NAXIS2")
-	if !wok || !hok || w <= 0 || ht <= 0 {
+	w64, wok := h.Int("NAXIS1")
+	ht64, hok := h.Int("NAXIS2")
+	if !wok || !hok || w64 <= 0 || ht64 <= 0 {
 		return nil, detErr("preview: bad NAXIS1/NAXIS2")
 	}
-	channels := int64(1)
+	if err := checkPixelCeiling(w64, ht64); err != nil {
+		return nil, detErr("preview: %v", err)
+	}
+	// The ceiling bounds both axes far below int32, so neither narrowing can fail.
+	w, _ := int32Of(w64)
+	ht, _ := int32Of(ht64)
+	channels := 1
 	if naxis == 3 {
 		n3, ok := h.Int("NAXIS3")
 		if !ok || (n3 != 1 && n3 != 3) {
 			return nil, detErr("preview: unsupported NAXIS3 %d", n3)
 		}
-		channels = n3
+		channels, _ = int32Of(n3)
 	} else if naxis != 2 {
 		return nil, detErr("preview: unsupported NAXIS %d", naxis)
-	}
-	if err := checkPixelCeiling(w, ht); err != nil {
-		return nil, detErr("preview: %v", err)
 	}
 
 	bzero, _ := h.Float("BZERO")
@@ -95,12 +99,12 @@ func decode(hdr header.Reader, path string) (*decoded, error) {
 		bscale = 1
 	}
 
-	pix, err := readPixels(path, int(bitpix), int(w), int(ht), int(channels), bscale, bzero)
+	pix, err := readPixels(path, bitpix, w, ht, channels, bscale, bzero)
 	if err != nil {
 		return nil, err
 	}
 
-	d := &decoded{W: int(w), H: int(ht), Channels: int(channels), Pix: pix}
+	d := &decoded{W: w, H: ht, Channels: channels, Pix: pix}
 	if ro, ok := h.Str("ROWORDER"); ok && normalizeRowOrder(ro) == "BOTTOM-UP" {
 		d.bottomUp = true
 	}
@@ -108,9 +112,13 @@ func decode(hdr header.Reader, path string) (*decoded, error) {
 	// already colour-separated and never debayered.
 	if d.Channels == 1 {
 		if pat, ok := h.Str("BAYERPAT"); ok {
-			xoff, _ := h.Int("XBAYROFF")
-			yoff, _ := h.Int("YBAYROFF")
-			if b, ok := parseBayer(pat, int(xoff), int(yoff)); ok {
+			// An absent offset reads as 0; one outside int32 is malformed, and
+			// debayering on its guessed phase would be worse than a mono render.
+			xoff64, _ := h.Int("XBAYROFF")
+			yoff64, _ := h.Int("YBAYROFF")
+			xoff, xok := int32Of(xoff64)
+			yoff, yok := int32Of(yoff64)
+			if b, ok := parseBayer(pat, xoff, yoff); ok && xok && yok {
 				d.isCFA = true
 				d.bayer = b
 			}
@@ -207,6 +215,17 @@ func readPixels(path string, bitpix, w, h, channels int, bscale, bzero float64) 
 		return nil, detErr("preview: unsupported BITPIX %d", bitpix)
 	}
 	return out, nil
+}
+
+// int32Of narrows a FITS header integer (parsed as int64) to int, refusing any
+// value outside int32: far beyond every legal geometry, BITPIX or Bayer offset, and
+// the narrowest int Go has. A crafted header must be rejected, never wrapped into a
+// small valid-looking value.
+func int32Of(v int64) (int, bool) {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return 0, false
+	}
+	return int(v), true
 }
 
 func validBitpix(b int) bool {

@@ -185,6 +185,16 @@ func TestPreviewerDimensions(t *testing.T) {
 	}
 }
 
+// A width past int32 is not a dimension the lightbox can use; Dimensions refuses
+// it rather than handing the zoom srcSet an absurd (or, on a 32-bit int, wrapped) value.
+func TestPreviewerDimensionsRejectsOutOfRange(t *testing.T) {
+	p, _ := testPreviewer(t, 2)
+	path := buildFITS(t, mono16Cards(4294967298, 2, 32768), be16(0, 0, 0, 0))
+	if w, h, err := p.Dimensions(path); err == nil {
+		t.Fatalf("dimensions = %dx%d, want an error", w, h)
+	}
+}
+
 func make16(n int) []int16 {
 	out := make([]int16, n)
 	for i := range out {

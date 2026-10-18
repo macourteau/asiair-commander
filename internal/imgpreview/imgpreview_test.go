@@ -151,6 +151,53 @@ func TestDecodeRejectsDeterministic(t *testing.T) {
 	}
 }
 
+// A crafted header can carry integers far past int32. They must be refused, never
+// narrowed: on a 32-bit int a wrapped BITPIX or NAXIS1 would read as a small valid one.
+func TestDecodeRejectsOutOfRangeHeaderIntegers(t *testing.T) {
+	cases := map[string][]string{
+		"bitpix wraps to 16": {
+			card("SIMPLE", "T"), card("BITPIX", "4294967312"), card("NAXIS", "2"),
+			card("NAXIS1", "2"), card("NAXIS2", "2"),
+		},
+		"naxis1 wraps to 2": {
+			card("SIMPLE", "T"), card("BITPIX", "16"), card("NAXIS", "2"),
+			card("NAXIS1", "4294967298"), card("NAXIS2", "2"),
+		},
+	}
+	for name, cards := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := buildFITS(t, cards, be16(0, 0, 0, 0))
+			_, err := decode(header.New(), path)
+			if err == nil || !isDeterministic(err) {
+				t.Fatalf("want deterministic error, got %v", err)
+			}
+		})
+	}
+}
+
+// A Bayer offset outside int32 is a malformed header, not a phase: the frame
+// renders as a plain mono plane rather than debayering on a guessed parity.
+func TestDecodeBayerOffsetOutOfRangeIsNotCFA(t *testing.T) {
+	cards := mono16Cards(2, 2, 32768, strCard("BAYERPAT", "RGGB"), card("XBAYROFF", "4294967297"))
+	path := buildFITS(t, cards, be16(0, 0, 0, 0))
+	if d := decodeFile(t, path); d.isCFA {
+		t.Fatal("out-of-range XBAYROFF must not yield a CFA frame")
+	}
+}
+
+func TestParseSizeReturnsCanonicalSizes(t *testing.T) {
+	for _, s := range []Size{SizeThumb, SizeCard, SizeScreen, SizeFull} {
+		if got, ok := ParseSize(string(s)); !ok || got != s {
+			t.Errorf("ParseSize(%q) = %q, %v", s, got, ok)
+		}
+	}
+	for _, s := range []string{"", "THUMB", "../thumb", "thumb/../../x"} {
+		if _, ok := ParseSize(s); ok {
+			t.Errorf("ParseSize(%q) accepted", s)
+		}
+	}
+}
+
 func TestDecodeCFADetected(t *testing.T) {
 	cards := mono16Cards(2, 2, 32768, strCard("BAYERPAT", "RGGB"))
 	path := buildFITS(t, cards, be16(0, 0, 0, 0))
