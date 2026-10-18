@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -166,8 +167,10 @@ func (w *Worker) scanRoot(ctx context.Context, cfg *model.Config, root string, a
 				RigID:    w.profileID,
 				Severity: model.SeverityWarn,
 				Category: model.AlertLibraryReconciled,
-				Message: fmt.Sprintf("%d frame(s) removed outside the app from %s (observed %s)",
-					newlyMissing, dir, w.now().Format("2006-01-02")),
+				// An event: the count and date keep a later cull in the same folder
+				// from deduplicating onto this row (design library-reconciliation §4.8).
+				Message: fmt.Sprintf("%s removed outside the app from %s (observed %s)",
+					framesCount(newlyMissing), libraryFolderLabel(cfg.Roots, root, dir), w.now().Format("2006-01-02")),
 			})
 		}
 		// Between groups: yield, service commands, honour a pause.
@@ -188,6 +191,32 @@ func (w *Worker) scanRoot(ctx context.Context, cfg *model.Config, root string, a
 }
 
 var errScanAbandoned = errors.New("library scan abandoned")
+
+// framesCount is "1 frame" or "n frames".
+func framesCount(n int) string {
+	if n == 1 {
+		return "1 frame"
+	}
+	return fmt.Sprintf("%d frames", n)
+}
+
+// libraryFolderLabel names dir for an operator: its path under root and which
+// library root that is, not the absolute mount path, which says nothing about
+// where in the library the frames were.
+func libraryFolderLabel(roots model.Roots, root, dir string) string {
+	library := "light library"
+	if root == roots.Cal && root != roots.Light {
+		library = "calibration library"
+	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return dir // not under root: the absolute path is the only honest name
+	}
+	if rel == "." {
+		return "the top of the " + library
+	}
+	return filepath.ToSlash(rel) + " in the " + library
+}
 
 // reconcileDir applies design library-reconciliation §2.5's three-step
 // present/absent decision to one directory group and returns how many frames it

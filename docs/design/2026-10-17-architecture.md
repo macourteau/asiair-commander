@@ -1341,8 +1341,17 @@ This section fixes what each surface shows and the data behind it, not its look.
 - **Devices** (`/devices`) — rig profiles (binding, sources with per-share disable, OTA,
   grace, logs, keep-originals, clock sync, managed), the discovered-but-unconfigured list and
   adopt dialog, per-rig commands, the unclassified view with re-classify and dismiss, the
-  missing-frames panel with restore and acknowledge, and remote sites.
-- **History** (`/history`) — the paginated transfer history.
+  missing-frames panel with restore and acknowledge, and remote sites. `?rig=<id>&show=missing`
+  or `&show=unclassified` opens that rig's panel and moves focus to it, so a link can land on
+  exactly the frames it names.
+- **History** (`/history`) — the paginated transfer history. `?view=never_deletable` lists the
+  frames behind the backlog alert, each with a "Why it stays" dialog: a plain sentence on why
+  the frame stays on the device and what clears it, the recorded error behind a disclosure, and
+  only the actions that exist for its state. An unclassified frame offers dismiss
+  ([frame-lifecycle §13](2026-10-17-frame-lifecycle.md)) and a link to its rig's unclassified
+  panel for re-classify; a failed frame retries on its own (frame-lifecycle §4.3); a held frame
+  has no operator exit ([delete-safety §2.4](2026-10-17-delete-safety.md)), and the dialog says
+  so rather than offer one.
 - **Tools** (`/tools`) — find frames, retarget, and re-file to the current templates.
 - **Files** (`/files`) — the device file browser.
 - **Settings** (`/settings`) — templates with an edit mode whose token chips are scoped to
@@ -1354,7 +1363,10 @@ This section fixes what each surface shows and the data behind it, not its look.
   restart" notes (§3.8).
 - **Logs** (`/logs`) — the application's own log and the device logs pulled per rig, in one
   place, so a postmortem starts there.
-- **Alerts** (`/alerts`) — the problem feed with acknowledge.
+- **Alerts** (`/alerts`) — the problem feed with acknowledge. `?rig=<id>` narrows it to one
+  rig (the Dashboard card's "Review alerts" link), with a notice that clears the filter. An
+  alert with a "show me" link names its rig in the link's accessible name, so two rigs' links
+  on one page are told apart.
 - **Login** and **Setup** — §8.1, §8.2.3.
 
 ### 9.2 UI writing principles
@@ -1457,7 +1469,7 @@ condition acknowledged and still standing past that raises once more, as a remin
 | `frame_lost` | a doubly-vanished frame, or a reused path whose old copy is not proven | [frame-lifecycle §4.2, §9.4](2026-10-17-frame-lifecycle.md) |
 | `rot_clash` | a different-content clash at a frame's canonical name (possible rot) | [frame-lifecycle §8.3](2026-10-17-frame-lifecycle.md) |
 | `unclassified` | unknown `IMAGETYP`, a missing routing-critical value, or a FITS parse failure | [routing-and-filing §2](2026-10-17-routing-and-filing.md) |
-| `backlog` | any never-deletable frames (`unclassified` not culled, `held`, `failed`) remain on a rig, named by its display name; **critical "capture may stop"** on a `capacity_constrained` rig whose tightest watched share is below `disk_reserve_bytes`. The Alerts page links it to those frames in History | below |
+| `backlog` | any never-deletable frames (`unclassified` not culled, `held`, `failed`) remain on a rig, named by its display name; **critical "capture may stop"** on a `capacity_constrained` rig whose tightest watched share is below `disk_reserve_bytes`. The message names what clears each kind (reclassify or dismiss, a successful retry, a confirmed NAS copy) and promises nothing the linked History view does not offer. The Alerts page links it to those frames in History | below |
 | `device_disk_low` | a rig's tightest watched share is below `disk_reserve_bytes` | below |
 | `nas_disk_low` | NAS free space below `disk_reserve_bytes` (fleet-wide) | §7.6 |
 | `destination_unavailable` | the NAS destination cannot be read (fleet-wide), or a rig's staging write probe fails (rig-scoped) | §7.6 |

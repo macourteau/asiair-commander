@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { ackButtonLabel, alertFramesLink, nextAckFocus, rigDisplayName } from "./alerts";
+import {
+  ackButtonLabel,
+  alertFramesLink,
+  alertsForRig,
+  nextAckFocus,
+  rigAlertsLink,
+  rigDisplayName,
+} from "./alerts";
 
 describe("rigDisplayName", () => {
   const rigs = [{ id: "fra300", name: "FRA300 Rig" }];
@@ -14,14 +21,44 @@ describe("rigDisplayName", () => {
 
 describe("alertFramesLink", () => {
   it("links a rig's backlog alert to its never-deletable frames in History", () => {
-    expect(alertFramesLink({ category: "backlog", rig_id: "fra 300" })).toBe(
-      "/history?rig=fra+300&view=never_deletable",
-    );
+    expect(alertFramesLink({ category: "backlog", rig_id: "fra 300" }, "FRA300 Rig")).toEqual({
+      to: "/history?rig=fra+300&view=never_deletable",
+      text: "Show these frames in History",
+      label: "Show FRA300 Rig's frames that can't be removed, in History",
+    });
   });
-  it("gives other alerts, and a backlog with no rig, no link", () => {
-    expect(alertFramesLink({ category: "nas_disk_low", rig_id: "" })).toBeNull();
-    expect(alertFramesLink({ category: "device_disk_low", rig_id: "r" })).toBeNull();
-    expect(alertFramesLink({ category: "backlog", rig_id: "" })).toBeNull();
+  it("links a rig's library_reconciled alert to its missing frames in Devices", () => {
+    expect(alertFramesLink({ category: "library_reconciled", rig_id: "rig-fra" }, "FRA300 Rig")).toEqual({
+      to: "/devices?rig=rig-fra&show=missing",
+      text: "Show missing frames in Devices",
+      label: "Show FRA300 Rig's missing frames, in Devices",
+    });
+  });
+  it("names each rig in its link, so two alerts' links differ", () => {
+    const a = alertFramesLink({ category: "backlog", rig_id: "a" }, "FRA300 Rig");
+    const b = alertFramesLink({ category: "backlog", rig_id: "b" }, "Newtonian Rig");
+    expect(a?.label).not.toBe(b?.label);
+  });
+  it("gives other alerts, and an alert with no rig, no link", () => {
+    expect(alertFramesLink({ category: "nas_disk_low", rig_id: "" }, "")).toBeNull();
+    expect(alertFramesLink({ category: "device_disk_low", rig_id: "r" }, "R")).toBeNull();
+    expect(alertFramesLink({ category: "backlog", rig_id: "" }, "")).toBeNull();
+  });
+});
+
+describe("alertsForRig", () => {
+  const alerts = [{ rig_id: "a" }, { rig_id: "b" }, { rig_id: "" }];
+  it("keeps only the rig's alerts", () => {
+    expect(alertsForRig(alerts, "a")).toEqual([{ rig_id: "a" }]);
+  });
+  it("keeps every alert with no rig chosen", () => {
+    expect(alertsForRig(alerts, "")).toHaveLength(3);
+  });
+});
+
+describe("rigAlertsLink", () => {
+  it("filters the Alerts page to the rig", () => {
+    expect(rigAlertsLink("rig fra")).toBe("/alerts?rig=rig+fra");
   });
 });
 

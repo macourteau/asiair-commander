@@ -20,6 +20,7 @@ import {
   formatRA,
 } from "../util/format";
 import { FrameLightbox } from "./FrameLightbox";
+import { stuckFrameHelp } from "../util/stuckFrame";
 
 export function FrameDetailModal({
   frame,
@@ -106,7 +107,21 @@ export function FrameDetailModal({
           {!!frame.next_retry_at && (
             <Row label="Next retry">{absoluteTime(frame.next_retry_at)}</Row>
           )}
-          {frame.error && (
+          {frame.state === "held" && (
+            // The recorded error is written for the logs ("delete-pass three-way
+            // check failed ..."); the operator gets the plain reason, with the
+            // technical text one click away.
+            <Row label="Why it's held">
+              <span>{stuckFrameHelp(frame)?.why}</span>
+              {frame.error && (
+                <details>
+                  <summary>Technical detail</summary>
+                  <span className="mono break-anywhere">{frame.error}</span>
+                </details>
+              )}
+            </Row>
+          )}
+          {frame.error && frame.state !== "held" && (
             <Row label="Error">
               <span className="tone-problem" style={{ color: "var(--problem-fg)" }}>
                 {frame.error}

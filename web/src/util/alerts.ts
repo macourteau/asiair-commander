@@ -1,6 +1,7 @@
 /**
  * Alerts-page helpers: naming an alert's rig, the link from an alert to the
- * frames behind it, and where keyboard focus goes after an acknowledgement.
+ * frames behind it, the per-rig filter, and where keyboard focus goes after an
+ * acknowledgement.
  */
 import type { Alert } from "@/api";
 
@@ -12,15 +13,62 @@ export function rigDisplayName(rigId: string, rigs: readonly { id: string; name:
   return rigs.find((r) => r.id === rigId)?.name || rigId;
 }
 
+/** The ?show= of Devices that opens a rig's missing-frames panel. */
+export const MISSING_PANEL = "missing";
+/** The ?show= of Devices that opens a rig's unclassified-frames panel. */
+export const UNCLASSIFIED_PANEL = "unclassified";
+
+/** A rig's panel on the Devices page, opened and scrolled to. */
+export function devicesPanelLink(rigId: string, panel: string): string {
+  return `/devices?${new URLSearchParams({ rig: rigId, show: panel }).toString()}`;
+}
+
+/** The Alerts page filtered to one rig. */
+export function rigAlertsLink(rigId: string): string {
+  return `/alerts?${new URLSearchParams({ rig: rigId }).toString()}`;
+}
+
+/** An alert's "show me" link: where it goes, its text, and its accessible name. */
+export interface AlertFramesLink {
+  to: string;
+  text: string;
+  /** Names the rig, so two alerts' links on one page are told apart. */
+  label: string;
+}
+
 /**
- * Where an alert's "show me" link goes, or null when it has none. The backlog
- * alert links to exactly the frames it is about: History filtered to the rig's
- * never-deletable (unclassified, held or failed) frames.
+ * The link from an alert to exactly the frames it is about, or null when it has
+ * none. The backlog alert goes to History filtered to the rig's never-deletable
+ * (unclassified, held or failed) frames; a library_reconciled alert goes to the
+ * rig's missing-frames panel in Devices, which lists the frames the scan marked
+ * missing, grouped by folder, with the actions that settle them.
  */
-export function alertFramesLink(alert: Pick<Alert, "category" | "rig_id">): string | null {
-  if (alert.category !== "backlog" || !alert.rig_id) return null;
-  const q = new URLSearchParams({ rig: alert.rig_id, view: NEVER_DELETABLE_VIEW });
-  return `/history?${q.toString()}`;
+export function alertFramesLink(
+  alert: Pick<Alert, "category" | "rig_id">,
+  rigName: string,
+): AlertFramesLink | null {
+  if (!alert.rig_id) return null;
+  switch (alert.category) {
+    case "backlog":
+      return {
+        to: `/history?${new URLSearchParams({ rig: alert.rig_id, view: NEVER_DELETABLE_VIEW }).toString()}`,
+        text: "Show these frames in History",
+        label: `Show ${rigName}'s frames that can't be removed, in History`,
+      };
+    case "library_reconciled":
+      return {
+        to: devicesPanelLink(alert.rig_id, MISSING_PANEL),
+        text: "Show missing frames in Devices",
+        label: `Show ${rigName}'s missing frames, in Devices`,
+      };
+    default:
+      return null;
+  }
+}
+
+/** The alerts that belong to rigId, or every alert when rigId is empty. */
+export function alertsForRig<T extends Pick<Alert, "rig_id">>(alerts: readonly T[], rigId: string): T[] {
+  return rigId ? alerts.filter((a) => a.rig_id === rigId) : [...alerts];
 }
 
 /** The accessible name of an alert's Acknowledge button, naming its subject. */

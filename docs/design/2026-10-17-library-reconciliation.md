@@ -714,8 +714,13 @@ category with two meanings silently ack the other. The catalogue is
 | `library_unavailable` | warn | a root `marker missing`, `marker corrupt` or `marker unreadable` for `rootUnavailableAlertAfter` (6 h), message carrying the reason and pointing at Settings › Library or a remount |
 | `library_mismatch` | critical | a root's marker parses and its id differs from the recorded id, immediately, pointing at Settings › Library |
 
-The `library_reconciled` message reads, for example, `14 frame(s) removed outside the app from
-/library/M31/RC8/NIGHT_2 (observed 2026-03-14)`. The count and date are in the message on purpose:
+The `library_reconciled` alert is labelled "Frames removed from the library outside the app", and
+its message reads, for example, `14 frames removed outside the app from M31/RC8/NIGHT_2 in the
+light library (observed 2026-03-14)`: the folder relative to its root and which root that is,
+because the absolute mount path says nothing about where in the library the frames were. The
+Alerts page links the alert to the rig's missing-frames panel in Devices
+(`/devices?rig=<id>&show=missing`), which lists the frames the scan marked missing, grouped by
+folder, with Restore and Acknowledge. The count and date are in the message on purpose:
 alerts are deduplicated on `(rig_id, category, message)` while unacked, so a larger later event
 produces a different string and is not suppressed. An equal-sized cull in the same directory on the
 same day produces an identical message and is swallowed; that is accepted, because an unacked

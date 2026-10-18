@@ -856,3 +856,46 @@ func TestCountNeverDeletableExcludesCulledUnclassified(t *testing.T) {
 		t.Fatalf("held must count even when the culled unclassified does not; got %d", n)
 	}
 }
+
+// The library_reconciled alert names the folder relative to its library root and
+// which root it is, never the raw absolute path: the operator knows the library by
+// its layout, and the absolute mount point is noise (design library-reconciliation
+// §4.8).
+func TestLibraryReconciledAlertNamesFolderUnderItsRoot(t *testing.T) {
+	h := newHarness(t, emmc, header.New())
+	f, _ := fileAndAge(t, h, false)
+	h.linkRoot(t, h.cfg.Roots.Light)
+	if err := os.Remove(f.DestPath); err != nil { // the operator culled the NAS copy
+		t.Fatal(err)
+	}
+	h.cycle()
+
+	rel, err := filepath.Rel(h.cfg.Roots.Light, filepath.Dir(f.DestPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "1 frame removed outside the app from " + filepath.ToSlash(rel) +
+		" in the light library (observed " + h.nowVal.Format("2006-01-02") + ")"
+	var got []string
+	for _, a := range h.notify.Raised() {
+		if a.Category == model.AlertLibraryReconciled {
+			got = append(got, a.Message)
+		}
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("library_reconciled messages = %q, want [%q]", got, want)
+	}
+}
+
+func TestLibraryFolderLabel(t *testing.T) {
+	roots := model.Roots{Light: "/srv/astro/light", Cal: "/srv/astro/cal"}
+	for _, tc := range []struct{ root, dir, want string }{
+		{"/srv/astro/light", "/srv/astro/light/M42/FRA300/NIGHT_2", "M42/FRA300/NIGHT_2 in the light library"},
+		{"/srv/astro/cal", "/srv/astro/cal/flat", "flat in the calibration library"},
+		{"/srv/astro/light", "/srv/astro/light", "the top of the light library"},
+	} {
+		if got := libraryFolderLabel(roots, tc.root, tc.dir); got != tc.want {
+			t.Errorf("libraryFolderLabel(%q, %q) = %q, want %q", tc.root, tc.dir, got, tc.want)
+		}
+	}
+}

@@ -20,7 +20,7 @@ const ALERT_CATEGORY_LABELS: Record<string, string> = {
   identity_mismatch: "Rig identity mismatch",
   identity_unconfirmed: "Rig identity unconfirmed",
   media_changed: "Removable media changed",
-  library_reconciled: "Library reconciled",
+  library_reconciled: "Frames removed from the library outside the app",
   library_unavailable: "Library unavailable",
   library_mismatch: "Library mismatch",
   clock_skew: "Clock skew",

@@ -12,7 +12,9 @@
  *
  * The device filter and the never-deletable view live in the URL (`?rig=` and
  * `?view=never_deletable`), so the backlog alert can link to exactly the frames
- * it is about (design architecture §10).
+ * it is about (design architecture §10). In that view each row carries a "Why it
+ * stays" button whose dialog explains the frame's state and offers the actions
+ * that exist for it (StuckFrameDialog).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
@@ -37,6 +39,7 @@ import {
   type Column,
 } from "@/design";
 import { FrameDetailModal } from "./FrameDetailModal";
+import { StuckFrameDialog } from "./StuckFrameDialog";
 import { FrameThumb } from "./FrameThumb";
 import { FrameLightbox } from "./FrameLightbox";
 import { CoordsCell, RotationCell } from "./AstrometryCells";
@@ -86,6 +89,7 @@ export function History() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Frame | null>(null);
+  const [stuck, setStuck] = useState<Frame | null>(null);
   const [lightbox, setLightbox] = useState<Frame | null>(null);
   const [pending, setPending] = useState(false); // live events arrived while off page 1
 
@@ -191,6 +195,26 @@ export function History() {
       header: <span className="sr-only">Preview</span>,
       cell: (f) => <FrameThumb frame={f} onOpen={setLightbox} />,
     },
+    // Second in this view, not last: it is the view's point, and a phone shows only
+    // the first columns of the table without a sideways scroll.
+    ...(neverDeletable
+      ? [
+          {
+            key: "why",
+            header: <span className="sr-only">What to do</span>,
+            cell: (f: Frame) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setStuck(f)}
+                aria-label={`Why ${basename(f.source_path)} stays on ${rigName(f.rig_id)}`}
+              >
+                Why it stays
+              </Button>
+            ),
+          },
+        ]
+      : []),
     { key: "device", header: "Device", cell: (f) => rigName(f.rig_id) },
     {
       key: "file",
@@ -312,7 +336,8 @@ export function History() {
           <Icon name="info" size={18} />
           <span className="grow">
             Showing only frames{rig ? ` on ${rigName(rig)}` : ""} that can't be removed from the
-            device automatically: unclassified, held or failed.
+            device automatically: unclassified, held or failed. Choose “Why it stays” on a row to
+            see what clears it.
           </span>
           <Button
             size="sm"
@@ -403,6 +428,12 @@ export function History() {
         rigLabel={selected ? rigName(selected.rig_id) : undefined}
         onHold={!!selected && selected.state === "verified" && rigKeepsOriginals(selected.rig_id)}
         onClose={() => setSelected(null)}
+      />
+      <StuckFrameDialog
+        frame={stuck}
+        rigLabel={stuck ? rigName(stuck.rig_id) : ""}
+        onClose={() => setStuck(null)}
+        onDismissed={reload}
       />
       <FrameLightbox frame={lightbox} onClose={() => setLightbox(null)} />
     </>

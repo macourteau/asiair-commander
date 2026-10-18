@@ -5,6 +5,7 @@
  * one-click "set this up" that prefills the editor from what answered on the LAN.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import {
   api,
   ApiError,
@@ -56,6 +57,7 @@ import { NextFrame } from "./NextFrame";
 import { RigActions } from "./RigActions";
 import { WaitingToSettle } from "./WaitingToSettle";
 import { rigIdFromField, splitProblems } from "../util/labels";
+import { MISSING_PANEL, UNCLASSIFIED_PANEL } from "../util/alerts";
 import { fieldErrors } from "../util/fieldErrors";
 import { scanSummary } from "../util/scanSummary";
 import { deviceFacts, rigNamePrefill, shortGuid, slug } from "../util/deviceLabel";
@@ -141,6 +143,11 @@ function SmbAddress({ ip }: { ip: string }) {
 
 export function Devices() {
   const toast = useToast();
+  // `?rig=<id>&show=missing|unclassified` opens that rig's panel and scrolls to it,
+  // so an alert or a History row can link to exactly the frames it is about.
+  const [params] = useSearchParams();
+  const linkedRig = params.get("rig") ?? "";
+  const linkedPanel = params.get("show") ?? "";
   const [rigs, setRigs] = useState<RigProfile[] | null>(null);
   // The scan toast names the rigs that answered, and reads them here rather than
   // from state so it never has to be rebuilt when the list loads or changes.
@@ -308,6 +315,7 @@ export function Devices() {
                 <li key={rig.id}>
                   <RigItem
                     rig={rig}
+                    openPanel={rig.id === linkedRig ? linkedPanel : ""}
                     onEdit={() =>
                       setEditor({
                         mode: "edit",
@@ -414,10 +422,13 @@ export function Devices() {
 
 function RigItem({
   rig,
+  openPanel,
   onEdit,
   onDeleted,
 }: {
   rig: RigProfile;
+  /** The panel a link asked for ("missing" or "unclassified"), opened on load. */
+  openPanel: string;
   onEdit: () => void;
   onDeleted: () => void;
 }) {
@@ -425,8 +436,8 @@ function RigItem({
   const snapshot = useSnapshot();
   const live: RigStatus | undefined = snapshot?.rigs.find((r) => r.id === rig.id);
   const [busy, setBusy] = useState<string | null>(null);
-  const [showFrames, setShowFrames] = useState(false);
-  const [showMissing, setShowMissing] = useState(false);
+  const [showFrames, setShowFrames] = useState(openPanel === UNCLASSIFIED_PANEL);
+  const [showMissing, setShowMissing] = useState(openPanel === MISSING_PANEL);
   const [showTransfers, setShowTransfers] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -482,6 +493,22 @@ function RigItem({
   const framesId = `rig-frames-${rig.id}`;
   const missingId = `rig-missing-${rig.id}`;
   const transfersId = `rig-transfers-${rig.id}`;
+
+  // A linked panel is scrolled to and takes focus, so a keyboard or screen-reader
+  // user lands on the frames the link promised rather than at the top of the page.
+  useEffect(() => {
+    const id =
+      openPanel === MISSING_PANEL ? missingId : openPanel === UNCLASSIFIED_PANEL ? framesId : "";
+    if (!id) return;
+    if (openPanel === MISSING_PANEL) setShowMissing(true);
+    else setShowFrames(true);
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      el?.scrollIntoView({ block: "start" });
+      el?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [openPanel, missingId, framesId]);
 
   return (
     <Card as="article" className="rig-item" aria-label={`Rig ${rig.name}`}>
@@ -696,13 +723,13 @@ function RigItem({
       </div>
 
       {showFrames && (
-        <div id={framesId} className="rig-detail">
+        <div id={framesId} className="rig-detail" role="region" tabIndex={-1} aria-label={`Unclassified frames on ${rigLabel}`}>
           <UnclassifiedFrames rigId={rig.id} />
         </div>
       )}
 
       {showMissing && (
-        <div id={missingId} className="rig-detail">
+        <div id={missingId} className="rig-detail" role="region" tabIndex={-1} aria-label={`Missing frames from ${rigLabel}`}>
           <MissingFrames rigId={rig.id} keepOriginals={rig.keep_originals} />
         </div>
       )}

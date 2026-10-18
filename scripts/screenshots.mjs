@@ -187,6 +187,14 @@ const SURFACES = [
   },
   // The "i" button per row opens the shared frame-detail dialog; capture it too.
   { name: "history", path: "/history", ready: "h1, main", detailTrigger: 'button[aria-label^="Details for"]' },
+  // The backlog alert's target: the never-deletable view, with the first row's
+  // "Why it stays" dialog.
+  {
+    name: "history-never-deletable",
+    path: "/history?view=never_deletable",
+    ready: "h1, main",
+    detailTrigger: 'button:has-text("Why it stays")',
+  },
   { name: "settings", path: "/settings", ready: "h1, main" },
   { name: "tools", path: "/tools", ready: "h1, main" },
   // The File browser, both panes addressed by query string: the left pane at a
@@ -203,6 +211,9 @@ const SURFACES = [
   },
   { name: "logs", path: "/logs", ready: "h1, main" },
   { name: "alerts", path: "/alerts", ready: "h1, main" },
+  // The Dashboard card's "Review alerts" target, and a library_reconciled alert's.
+  { name: "alerts-rig", path: "/alerts?rig=rig-fra", ready: "h1, main" },
+  { name: "devices-missing", path: "/devices?rig=rig-fra&show=missing", ready: "h1, main" },
   // The backlog alert's link: History narrowed to one rig's never-deletable
   // frames (the held frame tools/seeddemo stages per rig).
   { name: "history-never-deletable", path: "/history?rig=rig-fra&view=never_deletable", ready: "h1, main" },
