@@ -252,7 +252,7 @@ func TestRefileRefusesUnselectedDestination(t *testing.T) {
 // TestRefileUpdatesAllSharingRows (INV-M5, design routing-and-filing AC30) proves
 // one move updates every row of the rig sharing the file's dest_path in one
 // transaction — the identity four consumers depend on (CountLiveFramesByDest,
-// CountFramesTonight, bytes-tonight, ResidentCount) — and that a dest_path shared
+// CountFramesTonight, bytes-tonight, DeviceBreakdown) — and that a dest_path shared
 // with another rig is refused rather than moved.
 func TestRefileUpdatesAllSharingRows(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -1223,7 +1223,7 @@ func TestRefileRetargetedFrameSurvives(t *testing.T) {
 // frame whose device original is already reclaimed is moved without being
 // resurrected: it stays deleted, keeps its reclaim clock, never re-enters
 // DeletionEligible against an original that no longer exists, and does not inflate
-// ResidentCount.
+// the device breakdown.
 func TestRefileDeletedFrameStaysDeleted(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
@@ -1235,7 +1235,7 @@ func TestRefileDeletedFrameStaysDeleted(t *testing.T) {
 	if err := h.store.UpdateFrame(ctx, &del); err != nil {
 		t.Fatal(err)
 	}
-	residentBefore, err := h.store.ResidentCount(ctx, "rig-01")
+	countsBefore, err := h.store.DeviceBreakdown(ctx, "rig-01", h.nowVal.Unix())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1257,12 +1257,12 @@ func TestRefileDeletedFrameStaysDeleted(t *testing.T) {
 			t.Fatalf("a re-filed deleted frame must not re-enter DeletionEligible")
 		}
 	}
-	residentAfter, err := h.store.ResidentCount(ctx, "rig-01")
+	countsAfter, err := h.store.DeviceBreakdown(ctx, "rig-01", h.nowVal.Unix())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if residentAfter != residentBefore {
-		t.Fatalf("ResidentCount changed across the move: %d != %d", residentAfter, residentBefore)
+	if countsAfter != countsBefore {
+		t.Fatalf("device breakdown changed across the move: %+v != %+v", countsAfter, countsBefore)
 	}
 }
 

@@ -111,6 +111,21 @@
 .rigcard__drain svg {
   flex: none;
 }
+/* A wrapping sentence keeps its icon on the first line. */
+.rigcard__drain--frames {
+  align-items: flex-start;
+}
+.rigcard__drain--frames svg {
+  margin-top: calc((1lh - 16px) / 2);
+}
+/* The sentence, its badge and its links wrap beside the icon, never under it. */
+.rigcard__drain-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
 
 .rigcard__stats {
   display: grid;

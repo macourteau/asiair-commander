@@ -23,6 +23,11 @@ export function devicesPanelLink(rigId: string, panel: string): string {
   return `/devices?${new URLSearchParams({ rig: rigId, show: panel }).toString()}`;
 }
 
+/** History filtered to a rig's never-deletable frames: the backlog alert's list. */
+export function neverDeletableLink(rigId: string): string {
+  return `/history?${new URLSearchParams({ rig: rigId, view: NEVER_DELETABLE_VIEW }).toString()}`;
+}
+
 /** The Alerts page filtered to one rig. */
 export function rigAlertsLink(rigId: string): string {
   return `/alerts?${new URLSearchParams({ rig: rigId }).toString()}`;
@@ -51,7 +56,7 @@ export function alertFramesLink(
   switch (alert.category) {
     case "backlog":
       return {
-        to: `/history?${new URLSearchParams({ rig: alert.rig_id, view: NEVER_DELETABLE_VIEW }).toString()}`,
+        to: neverDeletableLink(alert.rig_id),
         text: "Show these frames in History",
         label: `Show ${rigName}'s frames that can't be removed, in History`,
       };

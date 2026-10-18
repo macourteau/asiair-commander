@@ -1,0 +1,5 @@
+/* The reason nothing will clear, on the Dashboard card and the Devices line. */
+.device-line__problem {
+  color: var(--tone-fg);
+  font-weight: 600;
+}

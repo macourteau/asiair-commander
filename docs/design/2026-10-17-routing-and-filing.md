@@ -1197,7 +1197,7 @@ deletion-eligible.
 A frame present on both the USB and eMMC shares (H12) is **two rows with one `dest_path`**, and
 several consumers depend on that identity: the "is another row using this NAS file?" guard dismiss
 consults before deleting a file, tonight's frame and byte counts (which count distinct `dest_path`),
-the resident count behind the drain label, and the cadence predictor. So re-file **moves the file
+the device breakdown behind the card's device line, and the cadence predictor. So re-file **moves the file
 once and updates every row sharing that `dest_path` in one transaction** — a second reason it cannot
 reuse the filing path, which commits one row at a time.
 
@@ -1689,7 +1689,7 @@ The numbers are stable references; code and tests cite them as
 25. A retargeted frame survives a re-file: its archive anchor still resolves to the edited hash and the
     delete pass raises no `delete_mismatch`.
 26. A `deleted` frame is still `deleted` after a re-file, does not reappear as deletion-eligible, and
-    does not inflate the resident count.
+    does not inflate the device breakdown.
 27. A row with a NULL or empty `dest_path` is never offered and never moved — specifically a resolved
     culled-original drain row (`deleted`, no missing mark, NULL path) and a failed re-pull row (literal
     `''`) — and `MoveDestPath` refuses an empty old path.
@@ -1734,7 +1734,7 @@ These two are checked by hand on a real install rather than by a test.
     `.DS_Store` files strand some folders and the preview warns about them. Turning the toggle back
     off shows the warning about already-filed panels.
 40. The rig still reports safe-to-power-off after the migration: no frame was marked missing by the
-    move, and the drain and resident counts are unchanged.
+    move, and the device line's counts are unchanged.
 
 ## 12. Rejected alternatives
 

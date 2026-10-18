@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { RigCard } from "./Dashboard";
 import type { RigStatus } from "@/api";
 
@@ -21,7 +22,7 @@ function baseRig(overrides: Partial<RigStatus>): RigStatus {
     requested: "running",
     frames_tonight: 0,
     shares: [],
-    drain: "",
+    device_frames: null,
     keep_originals: false,
     safe_to_power_off: "safe",
     listing_ts: 0,
@@ -147,5 +148,48 @@ describe("RigCard — reached through a remote", () => {
     );
     expect(screen.getByText("Transferring")).toBeTruthy();
     expect(screen.getByText("via Pier (reconnecting)")).toBeTruthy();
+  });
+});
+
+describe("RigCard — device line", () => {
+  const frames = { in_grace: 0, due: 0, culled: 0, stuck: 0, kept: 0, drained: false };
+  const card = (rig: Partial<RigStatus>) =>
+    render(
+      <MemoryRouter>
+        <RigCard rig={baseRig(rig)} alerts={[]} />
+      </MemoryRouter>,
+    );
+
+  it("says a rig never listed is not checked yet", () => {
+    card({ device_frames: null });
+    expect(screen.getByText("Device not checked yet")).toBeTruthy();
+    expect(screen.queryByText("in grace")).toBeNull();
+  });
+
+  it("separates stuck frames from those in grace and links to why they stay", () => {
+    card({ device_frames: { ...frames, in_grace: 3, stuck: 2 } });
+    expect(screen.getByText("2 can't be removed automatically")).toBeTruthy();
+    expect(screen.getByText("in grace")).toBeTruthy();
+    const link = screen.getByRole("link", { name: /^Why they stay/ });
+    expect(link.getAttribute("href")).toBe("/history?rig=r1&view=never_deletable");
+    expect(link.getAttribute("aria-label")).toContain("50P");
+  });
+
+  it("shows no in-grace badge when nothing is in grace", () => {
+    card({ device_frames: { ...frames, stuck: 2 } });
+    expect(screen.getByText("can't be removed automatically")).toBeTruthy();
+    expect(screen.queryByText("in grace")).toBeNull();
+  });
+
+  it("links culled frames to the rig's missing-frames panel", () => {
+    card({ device_frames: { ...frames, culled: 1 } });
+    const link = screen.getByRole("link", { name: /^Missing frames/ });
+    expect(link.getAttribute("href")).toBe("/devices?rig=r1&show=missing");
+  });
+
+  it("hides the line while only uncopied frames sit on the device", () => {
+    card({ device_frames: { ...frames } });
+    expect(screen.queryByText(/on the device/)).toBeNull();
+    expect(screen.queryByText(/Device/)).toBeNull();
   });
 });

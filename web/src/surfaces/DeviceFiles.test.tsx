@@ -644,7 +644,7 @@ function status(id: string, name: string, over: Partial<RigStatus> = {}): RigSta
     requested: "running",
     frames_tonight: 0,
     shares: [],
-    drain: "",
+    device_frames: null,
     keep_originals: false,
     safe_to_power_off: "safe",
     listing_ts: 0,

@@ -121,6 +121,28 @@ type FramePrediction struct {
 	SampleCount int `json:"sample_count"`
 }
 
+// DeviceFrames counts the frames still on a rig's device by why each one stays
+// (design frame-lifecycle §14.5). The SPA picks the words; the verdict never reads
+// these counts.
+type DeviceFrames struct {
+	// InGrace are verified, not culled, and still inside the grace period.
+	InGrace int `json:"in_grace"`
+	// Due are verified, not culled, and past grace: the next delete pass takes them.
+	Due int `json:"due"`
+	// Culled are verified or unclassified frames marked missing from the library,
+	// leaving through the cull drain.
+	Culled int `json:"culled"`
+	// Stuck are never removed automatically: held, failed, and unclassified not
+	// culled (the backlog alert's frames).
+	Stuck int `json:"stuck"`
+	// Kept is, on a keep-originals rig, what InGrace, Due and Culled would count;
+	// those three are then zero.
+	Kept int `json:"kept"`
+	// Drained is true when every count is zero, nothing awaits copying, and the
+	// rig deletes: the device's space is free.
+	Drained bool `json:"drained"`
+}
+
 // RigStatus is one rig's live card on the dashboard (design architecture §8
 // snapshot payload). It is an immutable value; the hub rebuilds the whole
 // snapshot on each publish.
@@ -131,14 +153,16 @@ type RigStatus struct {
 	// offline so the UI can offer a click-to-open SMB shortcut. Best-effort:
 	// empty until the address has been resolved at least once. It is the bare IP
 	// on the network Site names, never an endpoint's stored form.
-	Address        string         `json:"address,omitempty"`
-	State          RigState       `json:"state"`
-	Online         bool           `json:"online"`
-	Paused         bool           `json:"paused"`
-	Current        *CurrentFile   `json:"current,omitempty"`
-	FramesTonight  int            `json:"frames_tonight"`
-	Shares         []ShareFree    `json:"shares"`
-	Drain          string         `json:"drain"`          // e.g. "drained" / "3 resident" / "3 kept"; empty while uncopied frames sit on the device and none await deletion
+	Address       string       `json:"address,omitempty"`
+	State         RigState     `json:"state"`
+	Online        bool         `json:"online"`
+	Paused        bool         `json:"paused"`
+	Current       *CurrentFile `json:"current,omitempty"`
+	FramesTonight int          `json:"frames_tonight"`
+	Shares        []ShareFree  `json:"shares"`
+	// DeviceFrames says what is still on the device and why, one count per reason
+	// (design frame-lifecycle §14.5); nil until a listing completes.
+	DeviceFrames   *DeviceFrames  `json:"device_frames"`
 	KeepOriginals  bool           `json:"keep_originals"` // rig never deletes from the device
 	SafeToPowerOff SafeToPowerOff `json:"safe_to_power_off"`
 	// PowerOffReason explains an Unknown safe-to-power-off verdict so the UI can show

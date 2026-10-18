@@ -39,7 +39,8 @@ import { NextFrame } from "./NextFrame";
 import { WaitingToSettle } from "./WaitingToSettle";
 import { RemotePill, RigRemoteLines } from "./RemoteRig";
 import { rigRemoteView } from "../util/remoteRig";
-import { drainView } from "../util/drain";
+import { deviceLine } from "../util/drain";
+import { DeviceLineText } from "./DeviceLine";
 import "./dashboard.css";
 
 export function Dashboard() {
@@ -194,10 +195,8 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
         <p className="rigcard__hero-help tone-problem">{rig.missing_warning}</p>
       )}
 
-      {/* Drain — a different fact from "safe" */}
-      {rig.drain && (
-        <DrainRow drain={rig.drain} keepOriginals={rig.keep_originals} />
-      )}
+      {/* What is still on the device and why — a different fact from "safe" */}
+      <DrainRow rig={rig} />
 
       {/* Active alerts (always visible on the glance) */}
       {alerts.length > 0 && (
@@ -289,17 +288,12 @@ export function RigCard({ rig, alerts }: { rig: RigStatus; alerts: Alert[] }) {
   );
 }
 
-function DrainRow({
-  drain,
-  keepOriginals,
-}: {
-  drain: string;
-  keepOriginals: boolean;
-}) {
-  const view = drainView(drain);
+function DrainRow({ rig }: { rig: RigStatus }) {
+  const line = deviceLine(rig.device_frames, rig.keep_originals, rig.id, rig.name || rig.id);
+  if (line.kind === "hidden") return null;
   // Until the first listing completes (an offline rig never gets one) there is no
   // count to show and nothing known to be in its grace period.
-  if (view.kind === "unchecked") {
+  if (line.kind === "unchecked") {
     return (
       <div className="rigcard__drain tone-neutral">
         <Icon name="share" size={16} style={{ color: "var(--tone-fg)" }} />
@@ -307,44 +301,38 @@ function DrainRow({
       </div>
     );
   }
-  // A keep-originals rig never runs the delete pass: it frees no device space and
-  // is never "drained", so the count reads as originals kept by design — no
-  // "space freed" and no "in grace" (nothing is pending deletion).
-  if (keepOriginals) {
+  if (line.kind === "drained") {
     return (
-      <div className="rigcard__drain tone-neutral">
-        <Icon name="share" size={16} style={{ color: "var(--tone-fg)" }} />
-        <span>
-          <span className="mono">{drain}</span> on the device
-        </span>
-        <Badge srLabel="Keep originals: this rig never deletes originals from the device">
-          keep originals
-        </Badge>
+      <div className="rigcard__drain tone-safe">
+        <Icon name="safe" size={16} style={{ color: "var(--tone-fg)" }} />
+        <span>Device drained — space freed</span>
       </div>
     );
   }
-  const drained = view.kind === "drained";
   return (
-    <div className={`rigcard__drain tone-${drained ? "safe" : "neutral"}`}>
-      <Icon
-        name={drained ? "safe" : "share"}
-        size={16}
-        style={{ color: "var(--tone-fg)" }}
-      />
-      <span>
-        {drained ? (
-          <>Device drained — space freed</>
-        ) : (
-          <>
-            <span className="mono">{view.text}</span> still on the device
-          </>
+    <div className="rigcard__drain rigcard__drain--frames tone-neutral">
+      <Icon name="share" size={16} style={{ color: "var(--tone-fg)" }} />
+      <div className="rigcard__drain-body">
+        <DeviceLineText parts={line.parts} />
+        {/* The badge is a claim about the frames in grace, so it shows only while
+            some are; a keep-originals rig never deletes, so it reads as kept by
+            design instead. */}
+        {line.badge === "in_grace" && (
+          <Badge srLabel="In grace: originals kept during the grace period before deletion">
+            in grace
+          </Badge>
         )}
-      </span>
-      {!drained && (
-        <Badge srLabel="In grace: originals kept during the grace period before deletion">
-          in grace
-        </Badge>
-      )}
+        {line.badge === "keep_originals" && (
+          <Badge srLabel="Keep originals: this rig never deletes originals from the device">
+            keep originals
+          </Badge>
+        )}
+        {line.links.map((l) => (
+          <Link key={l.to} to={l.to} aria-label={l.label} className="text-sm">
+            {l.text}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

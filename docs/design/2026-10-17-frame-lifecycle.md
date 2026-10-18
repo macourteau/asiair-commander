@@ -1929,7 +1929,7 @@ The card shows two statuses that are easy to conflate, as different facts. **"Sa
 every frame on the device has been pulled and proven on the NAS, so powering off loses nothing. **Drained**
 means the device originals have been deleted, so the device's space is free. A pulled-but-in-grace
 original is safe and not drained. For a capacity-constrained rig that difference is the whole point, so
-the card shows "device drained" or "N originals still resident" beside the Safe verdict.
+the card shows what is still on the device, and why, beside the Safe verdict (§14.5).
 
 ### 14.1 The verdict
 
@@ -2018,3 +2018,100 @@ Yes, Working, or a listing-derived Unknown such as `missing_on_device` or `remov
 Unknown/"paused", Unknown/"offline…" and Unknown/"identity", so a kept verdict never claims anything past
 its listing. A plain Pause shows Unknown/"paused"; an offline end shows its own Unknown; an identity-error
 end shows Error with Unknown/"identity" (§12.6, run ends).
+
+### 14.5 What the device line says
+
+Below the verdict the card says what is still on the device and why, one count per reason, so it
+never claims a frame is waiting out its grace period when nothing will remove it. The server
+publishes the counts as `RigStatus.DeviceFrames` (`device_frames`), and the SPA picks the words.
+
+| Field | Frames counted | What clears them |
+| --- | --- | --- |
+| `in_grace` | `verified` with a `sha256`, not culled, `pulled_at` after the grace cutoff | the grace period ending, then the delete pass |
+| `due` | `verified` with a `sha256`, not culled, grace elapsed: what the delete pass takes | the next delete pass (§9, §12) |
+| `culled` | `verified` or `unclassified` with a missing mark | the cull drain once grace and the settle window pass, or Restore ([library-reconciliation §9, §11](2026-10-17-library-reconciliation.md)) |
+| `stuck` | `held`, `failed`, and `unclassified` not culled | nothing automatic but a failed frame's successful retry; otherwise the operator acts on them from the backlog alert's list |
+| `kept` | on a `keep_originals` rig, what the first three would count | nothing: the rig never deletes |
+
+`drained` is true when every count is zero, the latest listing left no frame awaiting work
+(`devicePending`), and the rig deletes. A nil `device_frames` means no listing has completed
+since startup: the card reads "Device not checked yet". When every count is zero but uncopied
+frames remain, the line is hidden, as the transfer readout and the verdict already say so.
+
+**Where the counts come from.** One store query, `DeviceBreakdown(rig, graceCutoff)`, feeds
+three call sites: the end-of-listing status, the throttled live refresh, and the post-dismiss
+recompute. Each bucket is a conditional aggregate over the
+rig's resident rows (`idx_frames_rig_state`), so the scan costs what a single count would and a
+poll runs no extra query and no per-frame work. The grace cutoff is the delete pass's own,
+`now − EffectiveGrace(profile)`, compared with `<=` as `DeletionEligible` does, so a frame moves
+from `in_grace` to `due` at the moment the delete pass would take it. `due` is exactly
+`DeletionEligible`'s `verified` branch less culled rows (a `sha256` present, `pulled_at` set
+and at or before the cutoff), and `in_grace` is the same rows with `pulled_at` after it; a
+`verified` row missing its `sha256` or `pulled_at` lands in no bucket, as the delete pass can
+never take it either. A zero or negative grace is not a case the line handles: config
+validation forbids it for a deleting rig, and the delete pass refuses to run on one. The `stuck` bucket is the
+store's `neverDeletableWhere` clause itself, counted per row, so it always equals the backlog
+alert's condition and the total of History's `?view=never_deletable` list
+([library-reconciliation §11.5](2026-10-17-library-reconciliation.md), I36). The other buckets
+count distinct `dest_path`, so an H12 USB/eMMC pair is one frame. A `failed` row records no
+`dest_path`; `stuck` counts rows, so a device holding only failed frames still shows them rather
+than hiding the line as an uncopied-only device does. The recompute after a dismiss runs only
+once a listing has published counts, so a dismiss on a rig not yet checked leaves "Device not
+checked yet" in place.
+
+**How the card reads.** A single reason reads as one sentence; with two or more, the headline
+is the sum, followed by each non-zero reason:
+
+- "3 frames on the device are in grace" with the **in grace** badge, when every frame is in grace.
+- "5 still on the device: 3 in grace, 2 can't be removed automatically", with the badge and a
+  "Why they stay" link to `/history?rig=<id>&view=never_deletable`.
+- "2 frames on the device can't be removed automatically", with the link and no badge.
+- "4 frames on the device are due for removal", while the delete pass works through them.
+- "1 frame removed from the library is leaving the device", with a link to the rig's missing-frames panel
+  in Devices.
+- "12 frames are kept on the device" with the **keep originals** badge, and any stuck frames named
+  after it: "12 frames are kept on the device; 2 can't be removed automatically", with the link.
+- "Device drained — space freed".
+
+The badge appears only while `in_grace` is non-zero. The stuck segment takes the problem tone,
+and its "Why they stay" link uses the same builder as the backlog alert's
+(`web/src/util/alerts.ts`); the culled segment's link reads "Missing frames". Each link's
+accessible name starts with its visible text and names the rig. A keep-originals rig has no
+drained state to fall back on, so its line always shows, "0 frames are kept on the device"
+included. A single reason reads as a whole sentence, "frame" or "frames" and "is" or "are"
+agreeing with its count; two or more reasons follow the sum, as above.
+Devices' live line renders the same sentence from the same helper (`web/src/util/drain.ts`) in
+compact form: no badge and no links, since the rig's panels sit just below it.
+
+**What this leaves alone.** The verdict (§14.1–§14.4) does not read these counts: frames awaiting
+deletion never count against Yes, and an Unknown verdict keeps its own reason (§14.3). The
+`culled` bucket includes the frames behind the `missing_on_device` reason, and the card's
+missing warning keeps explaining them. Leftover rows of a disabled share still count, as in
+[device-identity-and-media §8](2026-10-17-device-identity-and-media.md), and land in `due`; a
+share can only be disabled while its slot is empty, so such rows name files no longer present.
+
+**Compatibility.** `RigStatus` reaches only the SPA, through the `/events` snapshot. No metric
+reads the drain string, the remote supervisor reads only a rig's site and session, and status
+never crosses a remote tunnel. The SPA ships in the same binary, so `drain` is removed rather
+than kept beside the counts.
+
+Tests: `TestDeviceBreakdown` (store: every bucket built through `UpsertFrame`, the grace boundary,
+the H12 pair, a failed row with no `dest_path`, culled `unclassified` outside `stuck`, `verified`
+rows without a `sha256` or `pulled_at` in no bucket, `due` equal to what `DeletionEligible` takes,
+and `stuck` equal to `ListNeverDeletable`'s total on the same rows); `TestDeviceFrames` (the pure derivation,
+including `drained` and keep-originals);
+`TestDeviceLineSeparatesStuckFromGrace` (worker: a held frame beside frames in grace);
+`TestDeviceLineGraceMatchesDeletePass` (worker: a frame turns due on the cycle whose delete
+pass takes it, not a second earlier);
+`TestDeviceLineCountsFailedFrames` (worker: a failed-only device is stuck, not hidden);
+`TestDismissBeforeListingKeepsUnchecked`; and vitest for the wording and the badge rule beside
+`web/src/util/drain.ts`.
+
+| Alternative | Why rejected |
+| --- | --- |
+| Keep the string and only drop the badge | Removes the false claim but says nothing about why frames stay, so the card still disagrees with the alert it sits beside. |
+| A richer pre-formatted string ("3 in grace, 2 stuck") | Leaves the SPA parsing a sentence to decide the badge and the link. |
+| Derive the reasons in the SPA from the frame lists | Needs the whole frame set on the client and the grace cutoff, and repeats the never-deletable predicate outside the store. |
+| A separate never-deletable count query per poll | The breakdown already scans the same rows; a second query costs more and could disagree with it within a poll. |
+| Split `culled` by settle window | The operator's action is the same either way (wait, or Restore), and the missing-frames panel shows each frame's state. |
+| Keep `drain` beside `device_frames` | No consumer outside the bundled SPA reads it, and two sources for one line can disagree. |

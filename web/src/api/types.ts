@@ -86,6 +86,22 @@ export interface FramePrediction {
 /** What an operator last asked a rig for (the hub's requested state). */
 export type RequestedState = "running" | "paused" | "run_until_idle";
 
+/** The frames still on a rig's device, one count per reason they stay. */
+export interface DeviceFrames {
+  /** Verified, not culled, inside the grace period. */
+  in_grace: number;
+  /** Verified, not culled, past grace: the next delete pass takes them. */
+  due: number;
+  /** Removed from the library (culled); leaving through the cull drain. */
+  culled: number;
+  /** Held, failed, or unclassified and not culled: nothing removes them automatically. */
+  stuck: number;
+  /** Keep-originals rig: what the first three would count (they are then zero). */
+  kept: number;
+  /** Nothing left on the device, nothing awaiting copy, and the rig deletes. */
+  drained: boolean;
+}
+
 export interface RigStatus {
   id: string;
   name: string;
@@ -103,8 +119,9 @@ export interface RigStatus {
   cleanup?: CleanupProgress | null;
   frames_tonight: number;
   shares: ShareFree[];
-  /** Human phrase, e.g. "drained", "3 resident", or "3 kept" (keep-originals). */
-  drain: string;
+  /** What is still on the device and why (design frame-lifecycle §14.5); null until
+   * a listing completes since startup. */
+  device_frames: DeviceFrames | null;
   /** The rig never deletes originals from the device, so it never drains/frees space. */
   keep_originals: boolean;
   safe_to_power_off: SafeToPowerOff;
