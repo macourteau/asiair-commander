@@ -678,7 +678,8 @@ func verifyFile(path string, wantSize int64, wantSHA string) error {
 
 // unzipFlat extracts every file entry of the zip at src into dstDir, flattening any
 // path to its base name (the catalog zips are flat lists of .1476 tiles). It guards
-// against a Zip-Slip path by using only the base name.
+// against a Zip-Slip path by using only the base name, and refuses any base name
+// that is still not a plain local file name (on Windows, a reserved device name).
 func unzipFlat(src, dstDir string) error {
 	zr, err := zip.OpenReader(src)
 	if err != nil {
@@ -693,7 +694,7 @@ func unzipFlat(src, dstDir string) error {
 			continue
 		}
 		name := filepath.Base(f.Name)
-		if name == "" || name == "." || name == ".." {
+		if name == "." || !filepath.IsLocal(name) {
 			continue
 		}
 		if err := extractOne(f, filepath.Join(dstDir, name)); err != nil {
