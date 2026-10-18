@@ -131,6 +131,13 @@
   padding: 0 var(--space-2);
   min-height: 44px;
 }
+/* Left-aligned on the rows' inset, so it reads as part of the footer list rather
+   than a centred call to action. */
+.shell-nav__theme {
+  justify-content: flex-start;
+  padding: 0 var(--space-2);
+  min-height: 44px;
+}
 .shell-conn {
   display: inline-flex;
   align-items: center;
