@@ -55,11 +55,11 @@ const (
 	// cadence and the rig card's next-frame prediction counts down rather than
 	// reading overdue.
 	demoSkyOverhead = 8 * time.Second
-	// demoSkyBacklog caps the rendered frames a rig's fake holds at once, should
-	// the throttled pipeline fall behind the cadence, so the in-memory device
-	// cannot grow without bound.
-	demoSkyBacklog = 3
-	demoInterval   = 7 * time.Second // one new frame per rig every ~7s
+	// demoBacklog caps the generated frames, rendered or fallback, that a rig's
+	// fake holds unpulled, should the throttled pipeline fall behind the cadence,
+	// so the in-memory device cannot grow without bound.
+	demoBacklog  = 3
+	demoInterval = 7 * time.Second // one new frame per rig every ~7s
 	// The share's statfs: an ASIAIR's 32 GB eMMC with room to spare, so the
 	// dashboard shows a real figure and the File browser's upload plan warns
 	// about free space only for a file that would not fit.
@@ -79,17 +79,34 @@ func installDemo(
 	_ localfs.LocalFS,
 	logger *slog.Logger,
 ) (deviceFactory, rig.Resolver, header.Reader) {
-	reg := &demoRegistry{fakes: map[string]*device.Fake{}, skyReady: make(chan struct{})}
+	reg := newDemoRegistry()
 	logger.Info("DEMO MODE: real ASIAIR devices are stubbed by in-memory fakes")
 	go reg.prepareSky(ctx, logger)
 
-	factory := func(ep netsite.Endpoint, _, _ string, _ time.Duration) device.Device {
-		key, delay := demoDeviceAt(ep)
-		return slowDevice{Device: reg.fakeFor(key), delay: delay}
-	}
 	reg.preload()
 	go reg.generate(ctx, cfg, logger)
-	return factory, demoResolver{}, demoHeader{}
+	return reg.newDevice, demoResolver{}, demoHeader{}
+}
+
+func newDemoRegistry() *demoRegistry {
+	return &demoRegistry{
+		fakes: map[string]*device.Fake{}, skyReady: make(chan struct{}),
+		frames: map[string][]string{}, pulled: map[string]int64{},
+	}
+}
+
+// newDevice is the demo's deviceFactory: the throttled fake at ep.
+func (r *demoRegistry) newDevice(ep netsite.Endpoint, _, _ string, _ time.Duration) device.Device {
+	return r.throttled(demoDeviceAt(ep))
+}
+
+// throttled is rig key's fake behind the read throttle.
+func (r *demoRegistry) throttled(key string, delay time.Duration) device.Device {
+	return slowDevice{Device: r.fakeFor(key), delay: delay, pulled: func(share, path string) {
+		if share == demoShare {
+			r.markPulled(key, path)
+		}
+	}}
 }
 
 // demoRegistry hands out one persistent fake per address, so a worker sees the same
@@ -105,15 +122,22 @@ type demoRegistry struct {
 	skyReady chan struct{}
 	skySeq   map[string]int       // per-target frame number; guarded by mu
 	skyTurn  map[string]int       // per-rig position in its target rotation; guarded by mu
-	skyPaths map[string][]string  // per-rig rendered frames possibly still on the fake; guarded by mu
 	skyNext  map[string]time.Time // per-rig time the next exposure ends; guarded by mu
+
+	// Every generated frame possibly still on its rig's fake and, for each one a
+	// pull has read to its end, the generator round that read finished in. A
+	// fake holds its files in memory, so these bound what the generator leaves
+	// there (see emit). All guarded by mu.
+	frames map[string][]string // per rig
+	pulled map[string]int64    // keyed by frameKey
+	round  int64               // emit calls so far
 }
 
 // initSky makes the per-rig and per-target bookkeeping, before any is used.
 func (r *demoRegistry) initSky() {
 	r.sky = map[string]starfield.Frame{}
 	r.skySeq, r.skyTurn = map[string]int{}, map[string]int{}
-	r.skyPaths, r.skyNext = map[string][]string{}, map[string]time.Time{}
+	r.skyNext = map[string]time.Time{}
 }
 
 // prepareSky renders every target the demo rigs shoot, from the starfield cache
@@ -220,13 +244,26 @@ func (r *demoRegistry) generate(ctx context.Context, cfg *atomic.Pointer[model.C
 	}
 }
 
+// emit is one generator round. A fake keeps every file in memory, so what it
+// holds stays bounded the two ways a real device sheds frames: the generator
+// waits while a rig holds demoBacklog unpulled frames (a pipeline that is behind
+// or cannot reach the rig), and on a rig that keeps its originals, where no
+// delete pass ever runs, it removes the frames pulled before the previous round,
+// as an observer clears a card already archived. That one-round margin keeps a
+// removal clear of a pull that has just read the frame and is still filing it.
 func (r *demoRegistry) emit(cfg *atomic.Pointer[model.Config], targets, filters []string) {
 	c := cfg.Load()
+	r.mu.Lock()
+	r.round++
+	r.mu.Unlock()
 	for _, rp := range c.Rigs {
 		if !rp.Managed || rp.GUID == "" {
 			continue
 		}
-		if !r.addSkyFrame(rp.GUID) {
+		if rp.KeepOriginals {
+			r.clearPulled(rp.GUID)
+		}
+		if !r.addSkyFrame(rp.GUID) && r.backlog(rp.GUID) < demoBacklog {
 			r.addFrame(rp.GUID, targets, filters)
 		}
 	}
@@ -235,7 +272,7 @@ func (r *demoRegistry) emit(cfg *atomic.Pointer[model.Config], targets, filters 
 // addSkyFrame puts the next rendered frame of rig guid's targets on its fake,
 // named and headed as an ASIAIR Autorun light that finished exposing just now,
 // once the rig's previous exposure and its overhead have elapsed and unless the
-// rig already holds demoSkyBacklog of them. It reports false when the rig has no
+// rig already holds demoBacklog unpulled frames. It reports false when the rig has no
 // rendered target or the renders are not ready, so the caller falls back to a
 // random-byte frame.
 func (r *demoRegistry) addSkyFrame(guid string) bool {
@@ -253,7 +290,7 @@ func (r *demoRegistry) addSkyFrame(guid string) bool {
 	due := !end.Before(r.skyNext[guid])
 	r.mu.Unlock()
 	fake := r.fakeFor(guid)
-	if !due || r.skyBacklog(guid, fake) >= demoSkyBacklog {
+	if !due || r.backlog(guid) >= demoBacklog {
 		return true
 	}
 	r.mu.Lock()
@@ -273,34 +310,100 @@ func (r *demoRegistry) addSkyFrame(guid string) bool {
 	// backdated mtime, a current one keeps the rig card's next-frame prediction
 	// honest; the live demo config's min_file_age is 0.
 	fake.AddFile(demoShare, path, f.FITS(e), end)
-	r.mu.Lock()
-	r.skyPaths[guid] = append(r.skyPaths[guid], path)
-	r.mu.Unlock()
+	r.track(guid, path)
 	return true
 }
 
-// skyBacklog counts the rendered frames still on rig guid's fake, forgetting the
-// ones the delete pass has removed. A fake that cannot be read counts as empty.
-func (r *demoRegistry) skyBacklog(guid string, fake *device.Fake) int {
-	sess, err := fake.Open(context.Background())
+func frameKey(guid, path string) string { return guid + "\x00" + path }
+
+// track records a frame just written to rig guid's fake as generated and
+// unpulled; a rewrite of a path still on it (the sequence wrapping) is unpulled
+// again.
+func (r *demoRegistry) track(guid, path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.pulled, frameKey(guid, path))
+	for _, p := range r.frames[guid] {
+		if p == path {
+			return
+		}
+	}
+	r.frames[guid] = append(r.frames[guid], path)
+}
+
+// markPulled notes that a pull read a generated frame of rig guid to its end.
+// Reads of anything else (staged files, previews) are not tracked.
+func (r *demoRegistry) markPulled(guid, path string) {
+	path = strings.Trim(path, "/")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.frames[guid] {
+		if p == path {
+			r.pulled[frameKey(guid, path)] = r.round
+			return
+		}
+	}
+}
+
+// onDevice keeps only the generated frames of rig guid still on its fake,
+// forgetting the ones the delete pass has removed, and returns them. A fake
+// that cannot be read forgets nothing and returns nothing.
+func (r *demoRegistry) onDevice(guid string) []string {
+	sess, err := r.fakeFor(guid).Open(context.Background())
 	if err != nil {
-		return 0
+		return nil
 	}
 	defer sess.Close()
 	sh, err := sess.Mount(demoShare)
 	if err != nil {
-		return 0
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	kept := r.skyPaths[guid][:0]
-	for _, p := range r.skyPaths[guid] {
+	kept := r.frames[guid][:0]
+	for _, p := range r.frames[guid] {
 		if _, err := sh.Stat(p); err == nil {
 			kept = append(kept, p)
+		} else {
+			delete(r.pulled, frameKey(guid, p))
 		}
 	}
-	r.skyPaths[guid] = kept
-	return len(kept)
+	r.frames[guid] = kept
+	return append([]string(nil), kept...)
+}
+
+// backlog counts the generated frames on rig guid's fake that no pull has read.
+func (r *demoRegistry) backlog(guid string) int {
+	kept := r.onDevice(guid)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, p := range kept {
+		if _, ok := r.pulled[frameKey(guid, p)]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+// clearPulled removes from rig guid's fake the generated frames a pull read
+// to its end before the previous round (see emit).
+func (r *demoRegistry) clearPulled(guid string) {
+	r.onDevice(guid)
+	fake := r.fakeFor(guid)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	left := r.frames[guid][:0]
+	for _, p := range r.frames[guid] {
+		k := frameKey(guid, p)
+		if at, ok := r.pulled[k]; ok && at < r.round-1 {
+			fake.RemoveFile(demoShare, p)
+			delete(r.pulled, k)
+			continue
+		}
+		left = append(left, p)
+	}
+	r.frames[guid] = left
 }
 
 // preload puts the frames the remote scenario asks for on their devices before
@@ -326,6 +429,7 @@ func (r *demoRegistry) addFrame(guid string, targets, filters []string) {
 	_, _ = rand.Read(data[:1024]) // vary the head so each file hashes distinctly
 	// mtime a couple minutes back so it clears min_file_age immediately.
 	r.fakeFor(guid).AddFile(demoShare, path, data, time.Now().Add(-2*time.Minute))
+	r.track(guid, path)
 }
 
 func pad(n int64) string {
@@ -439,9 +543,11 @@ func (demoHeader) ReadHeader(path string) (model.Header, error) {
 // other method delegates for free. The throttle makes a copy take a few seconds so
 // the live progress bar is visible instead of completing instantly.
 
+// pulled, when set, is told each (share, path) a reader has read to its end.
 type slowDevice struct {
 	device.Device
-	delay time.Duration
+	delay  time.Duration
+	pulled func(share, path string)
 }
 
 func (d slowDevice) Open(ctx context.Context) (device.Session, error) {
@@ -449,12 +555,13 @@ func (d slowDevice) Open(ctx context.Context) (device.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return slowSession{Session: s, delay: d.delay}, nil
+	return slowSession{Session: s, delay: d.delay, pulled: d.pulled}, nil
 }
 
 type slowSession struct {
 	device.Session
-	delay time.Duration
+	delay  time.Duration
+	pulled func(share, path string)
 }
 
 func (s slowSession) Mount(name string) (device.Share, error) {
@@ -462,12 +569,13 @@ func (s slowSession) Mount(name string) (device.Share, error) {
 	if err != nil {
 		return nil, err
 	}
-	return slowShare{Share: sh, delay: s.delay}, nil
+	return slowShare{Share: sh, delay: s.delay, pulled: s.pulled}, nil
 }
 
 type slowShare struct {
 	device.Share
-	delay time.Duration
+	delay  time.Duration
+	pulled func(share, path string)
 }
 
 func (s slowShare) OpenReader(path string) (io.ReadCloser, error) {
@@ -475,7 +583,12 @@ func (s slowShare) OpenReader(path string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &slowReader{rc: rc, delay: s.delay}, nil
+	sr := &slowReader{rc: rc, delay: s.delay}
+	if s.pulled != nil {
+		share := s.Name()
+		sr.atEOF = func() { s.pulled(share, path) }
+	}
+	return sr, nil
 }
 
 // slowReader caps each read and sleeps first, so io.CopyBuffer streams in paced
@@ -483,6 +596,7 @@ func (s slowShare) OpenReader(path string) (io.ReadCloser, error) {
 type slowReader struct {
 	rc    io.ReadCloser
 	delay time.Duration
+	atEOF func() // called once, when a read reaches the end
 }
 
 func (r *slowReader) Read(p []byte) (int, error) {
@@ -490,7 +604,12 @@ func (r *slowReader) Read(p []byte) (int, error) {
 	if len(p) > demoReadChunk {
 		p = p[:demoReadChunk]
 	}
-	return r.rc.Read(p)
+	n, err := r.rc.Read(p)
+	if err == io.EOF && r.atEOF != nil {
+		r.atEOF()
+		r.atEOF = nil
+	}
+	return n, err
 }
 
 func (r *slowReader) Close() error { return r.rc.Close() }
