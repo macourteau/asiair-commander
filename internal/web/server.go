@@ -508,6 +508,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("GET /metrics", s.metricsHandler())
 	mux.HandleFunc("POST /api/diagnostics/pprof", s.guardWrite(s.handlePprof))
+	mux.HandleFunc("POST /api/diagnostics/heap", s.guardWrite(s.handleHeapProfile))
 
 	// SSE.
 	mux.HandleFunc("GET /events", s.handleEvents)
@@ -598,6 +599,7 @@ var registeredRoutes = []string{
 	"GET /healthz",
 	"GET /metrics",
 	"POST /api/diagnostics/pprof",
+	"POST /api/diagnostics/heap",
 	"GET /events",
 	"GET /api/",
 	"GET /",

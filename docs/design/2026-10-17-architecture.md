@@ -1176,7 +1176,7 @@ diagnostics endpoints (§8.11), every mutating route is `guardWrite` (§8.3) and
 | `/api/remotes...` | remote sites ([remote-sites §10](2026-10-17-remote-sites.md)) |
 | `GET /api/alerts`; `POST /api/alerts/{id}:ack` | alerts |
 | `GET /api/app-logs`, `/api/app-logs/stream`, `/api/app-logs/download` | the application's own log (§18) |
-| `GET /healthz`; `GET /metrics`; `POST /api/diagnostics/pprof` | diagnostics (§8.11) |
+| `GET /healthz`; `GET /metrics`; `POST /api/diagnostics/pprof`; `POST /api/diagnostics/heap` | diagnostics (§8.11) |
 | `GET /events` | the dashboard SSE stream (§8.9) |
 
 Unmatched `/api/` paths return a JSON 404; every other unmatched path serves the SPA (§8.10).
@@ -1319,9 +1319,13 @@ binary and the SPA, so the UI's out-of-sync banner fires only on a real skew.
   scraping from a LAN Prometheus, and an operator fronting Commander with a proxy controls
   which paths it forwards.
 - **`POST /api/diagnostics/pprof?seconds=N`** — an authenticated CPU profile for N seconds
-  (default 30, capped at 60), downloaded as a file. A raw `/debug/pprof` on a LAN-reachable
-  service leaks memory contents and is a trivial denial of service, so profiling is an
-  operator action behind the session rather than an open endpoint.
+  (default 30, capped at 60), downloaded as a file.
+- **`POST /api/diagnostics/heap`** — an authenticated heap profile, downloaded as a file. The
+  handler forces a garbage collection first so the in-use figures show live memory, not garbage
+  awaiting collection.
+- A raw `/debug/pprof` on a LAN-reachable service leaks memory contents and is a trivial denial
+  of service, so both profiles are operator actions behind the session (authenticated and
+  CSRF-checked like any mutation) rather than open endpoints.
 
 ## 9. UI surfaces
 
@@ -2054,7 +2058,7 @@ morning.
   own SSE stream (§8.9) and a download of the live file, beside the pulled device logs (§11), so a
   postmortem starts in one place instead of on the host.
 - **Metrics** (§17) and **profiling** (§8.11) cover what logs cannot: rates, durations, queue
-  depths, and a CPU profile captured in the field without a debug build.
+  depths, and CPU and heap profiles captured in the field without a debug build.
 
 ## 19. Installer and packaging
 

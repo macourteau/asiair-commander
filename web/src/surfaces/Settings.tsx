@@ -709,13 +709,22 @@ export function Settings() {
           </Field>
         </SectionCard>
 
-        {/* Diagnostics */}
-        <SectionCard
-          title="Diagnostics"
-          sub="Capture a CPU profile to diagnose a slow or busy server. The profile downloads as a .pprof file you can open with Go's pprof tooling."
-        >
-          <DiagnosticsSection />
-        </SectionCard>
+        {/* Diagnostics: two half-width cards, stacked on narrow screens. The gap
+            matches .section-stack so the pair spaces like the cards around it. */}
+        <div className="form-grid" style={{ gap: "var(--space-5)" }}>
+          <SectionCard
+            title="CPU profile"
+            sub="Capture a CPU profile to diagnose a slow or busy server. The profile downloads as a .pprof file you can open with Go's pprof tooling."
+          >
+            <CpuProfileSection />
+          </SectionCard>
+          <SectionCard
+            title="Memory profile"
+            sub="Capture a snapshot of what the server is holding in memory, to diagnose high or growing memory use. The profile downloads as a .pprof file you can open with Go's pprof tooling."
+          >
+            <MemoryProfileSection />
+          </SectionCard>
+        </div>
 
         <div className="cluster-between">
           <span className="text-sm text-muted">
@@ -1181,7 +1190,7 @@ function CatalogSection({ solver }: { solver?: ProvisionStatus }) {
   );
 }
 
-/* ---- Diagnostics (CPU profile capture) ---------------------------------- */
+/* ---- Diagnostics (CPU and memory profile capture) ---------------------- */
 
 const PROFILE_DURATIONS: SelectOption[] = [
   { value: "5", label: "5 seconds" },
@@ -1191,22 +1200,21 @@ const PROFILE_DURATIONS: SelectOption[] = [
 ];
 
 /**
- * Captures a CPU profile via the guarded POST /api/diagnostics/pprof. The request
- * blocks for the chosen number of seconds and returns an octet-stream, so it is
- * fetched directly (not through the JSON api client) with credentials and the
+ * Captures a profile from one of the guarded POST /api/diagnostics endpoints. The
+ * response is an octet-stream (the CPU one only after the chosen duration), so it
+ * is fetched directly (not through the JSON api client) with credentials and the
  * double-submit CSRF header, then streamed to a download via a temporary anchor —
  * a plain link/form navigation can't attach the CSRF header.
  */
-function DiagnosticsSection() {
-  const [seconds, setSeconds] = useState("30");
+function useProfileCapture() {
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const capture = useCallback(async () => {
+  const capture = useCallback(async (path: string, filePrefix: string) => {
     setError(null);
     setCapturing(true);
     try {
-      const res = await fetch(`/api/diagnostics/pprof?seconds=${seconds}`, {
+      const res = await fetch(path, {
         method: "POST",
         credentials: "same-origin",
         headers: { [CSRF_HEADER]: readCsrfToken() },
@@ -1220,7 +1228,7 @@ function DiagnosticsSection() {
       try {
         const a = document.createElement("a");
         a.href = url;
-        a.download = `cpu-${profileTimestamp()}.pprof`;
+        a.download = `${filePrefix}-${profileTimestamp()}.pprof`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1232,7 +1240,14 @@ function DiagnosticsSection() {
     } finally {
       setCapturing(false);
     }
-  }, [seconds]);
+  }, []);
+
+  return { capturing, error, capture };
+}
+
+function CpuProfileSection() {
+  const [seconds, setSeconds] = useState("30");
+  const { capturing, error, capture } = useProfileCapture();
 
   return (
     <div className="stack" style={{ ["--stack-gap" as string]: "var(--space-4)" }}>
@@ -1252,18 +1267,47 @@ function DiagnosticsSection() {
       </Field>
 
       <div>
-        <Button variant="primary" loading={capturing} onClick={capture}>
+        <Button
+          variant="primary"
+          loading={capturing}
+          onClick={() => capture(`/api/diagnostics/pprof?seconds=${seconds}`, "cpu")}
+        >
           {capturing ? "Capturing…" : "Capture CPU profile"}
         </Button>
       </div>
 
-      {error && (
-        <p className="notice tone-problem" role="alert">
-          <Icon name="problem" size={18} />
-          <span>{error}</span>
-        </p>
-      )}
+      <ProfileError error={error} />
     </div>
+  );
+}
+
+function MemoryProfileSection() {
+  const { capturing, error, capture } = useProfileCapture();
+
+  return (
+    <div className="stack" style={{ ["--stack-gap" as string]: "var(--space-4)" }}>
+      <div>
+        <Button
+          variant="primary"
+          loading={capturing}
+          onClick={() => capture("/api/diagnostics/heap", "heap")}
+        >
+          {capturing ? "Capturing…" : "Capture memory profile"}
+        </Button>
+      </div>
+
+      <ProfileError error={error} />
+    </div>
+  );
+}
+
+function ProfileError({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <p className="notice tone-problem" role="alert">
+      <Icon name="problem" size={18} />
+      <span>{error}</span>
+    </p>
   );
 }
 

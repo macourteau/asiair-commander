@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -987,6 +988,45 @@ func TestPprofRequiresAuth(t *testing.T) {
 	resp.Body.Close()
 	if len(b) == 0 {
 		t.Errorf("expected a non-empty profile")
+	}
+}
+
+func TestHeapProfileRequiresAuth(t *testing.T) {
+	h := newHarness(t, true)
+
+	// No session → 401.
+	resp := h.do("POST", "/api/diagnostics/heap", nil, reqOpts{})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("heap unauth: want 401, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	h.login()
+	resp = h.do("POST", "/api/diagnostics/heap", nil, reqOpts{csrf: true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("heap authed: want 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("heap content-type = %q", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, `filename="heap.pprof"`) {
+		t.Errorf("heap content-disposition = %q", cd)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// A debug=0 profile is a gzipped protobuf; the text form (debug=1) is not.
+	zr, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("heap profile is not gzip (%d bytes): %v", len(b), err)
+	}
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("decompress heap profile: %v", err)
+	}
+	// The proto's string table names the heap sample types; a CPU profile would
+	// carry "samples"/"cpu" instead.
+	if !bytes.Contains(raw, []byte("inuse_space")) {
+		t.Errorf("heap profile (%d bytes) lacks the inuse_space sample type", len(raw))
 	}
 }
 
