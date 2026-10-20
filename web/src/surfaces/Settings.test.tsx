@@ -165,3 +165,57 @@ describe("Settings unsaved-edits guard", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   });
 });
+
+describe("Settings memory profile", () => {
+  /** Answers the heap endpoint with `heap()` and every other path as the default stub does. */
+  function stubHeap(heap: () => Response) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input).split("?")[0];
+      if (path === "/api/config") return json(200, CONFIG);
+      if (path === "/api/diagnostics/heap") return heap();
+      return json(404, { error: "not found" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("posts with the CSRF header and downloads heap-<timestamp>.pprof", async () => {
+    document.cookie = "XSRF-TOKEN=tok123";
+    const fetchMock = stubHeap(() => new Response(new Uint8Array([0x1f, 0x8b]), { status: 200 }));
+    // jsdom implements neither object URLs nor anchor-driven downloads.
+    URL.createObjectURL = vi.fn(() => "blob:heap");
+    URL.revokeObjectURL = vi.fn();
+    const downloads: string[] = [];
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      });
+
+    renderAt();
+    fireEvent.click(await screen.findByRole("button", { name: "Capture memory profile" }));
+
+    await waitFor(() => expect(downloads).toHaveLength(1));
+    expect(downloads[0]).toMatch(/^heap-\d{8}-\d{6}\.pprof$/);
+    const call = fetchMock.mock.calls.find(([input]) => String(input) === "/api/diagnostics/heap");
+    expect(call?.[1]?.method).toBe("POST");
+    expect((call?.[1]?.headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
+    click.mockRestore();
+  });
+
+  it("shows the server's error and re-enables the button", async () => {
+    stubHeap(() => json(500, { error: "could not capture the heap profile" }));
+
+    renderAt();
+    fireEvent.click(await screen.findByRole("button", { name: "Capture memory profile" }));
+
+    const message = await screen.findByText("could not capture the heap profile");
+    expect(message.closest("[role=alert]")).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Capture memory profile" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+  });
+});

@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"net/http"
+	"runtime"
 	"runtime/pprof"
 	"time"
 )
@@ -68,9 +69,33 @@ func (s *Server) handlePprof(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 	}
 	pprof.StopCPUProfile()
+	s.log.Info("web: captured CPU profile", "seconds", seconds, "bytes", buf.Len())
+	s.writeProfile(w, "cpu.pprof", buf.Bytes())
+}
 
+// handleHeapProfile captures a heap profile (design architecture §8, guarded like
+// the CPU profile). It forces a GC first so the in-use figures reflect live
+// memory rather than garbage the collector has not reclaimed yet; the profile
+// still carries the cumulative allocation samples alongside them.
+func (s *Server) handleHeapProfile(w http.ResponseWriter, r *http.Request) {
+	runtime.GC()
+	var buf bytes.Buffer
+	// debug=0 is the gzipped protobuf `go tool pprof` reads.
+	if err := pprof.Lookup("heap").WriteTo(&buf, 0); err != nil {
+		s.log.Error("web: heap profile capture failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not capture the heap profile")
+		return
+	}
+	s.log.Info("web: captured heap profile", "bytes", buf.Len())
+	s.writeProfile(w, "heap.pprof", buf.Bytes())
+}
+
+// writeProfile sends a captured profile as a file download.
+func (s *Server) writeProfile(w http.ResponseWriter, filename string, data []byte) {
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="cpu.pprof"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(buf.Bytes())
+	if _, err := w.Write(data); err != nil {
+		s.log.Warn("web: writing profile download failed", "file", filename, "err", err)
+	}
 }
