@@ -6,14 +6,14 @@ and renders real previews. Where `tools/seeddemo` stages synthetic frames, this 
 real header-parse and classify path against captured subs.
 
 ```
-go run ./tools/seedreal <data-dir> <fits-root>
-SEED_FITS_ROOT=<fits-root> go run ./tools/seedreal <data-dir>   # same, root from the environment
-go run ./cmd/asiair-commander -data-dir <data-dir>                # :8787, password test1234
+make demo-up SEED=seedreal SEED_ARGS=<fits-root>   # :8787, password test1234
 OUT=<out-dir> AC_PASSWORD=test1234 TARGET=http://localhost:8787 \
   NODE_PATH=$(npm root -g) node scripts/screenshots.mjs
+make demo-down
 ```
 
-Run `make spa` before starting the server, or it serves the placeholder page.
+`demo-up` runs `go run ./tools/seedreal <data-dir> <fits-root>` first (`SEED_FITS_ROOT` in the
+environment also names the root), runs `make spa`, and builds a plain binary.
 
 What it stages:
 

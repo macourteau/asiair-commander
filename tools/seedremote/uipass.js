@@ -18,10 +18,9 @@
 // Allow about four minutes: the unreachable threshold is seeded at two.
 //
 // Playwright lives in the GLOBAL node_modules on this machine.
-//   go run ./tools/seedremote <data-dir>
-//   make spa && go build -tags demo -ldflags "-X main.version=$(git describe --tags --always) -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o <bin> ./cmd/asiair-commander
-//   <bin> -data-dir <data-dir>                                   # :8790
-//   OUT=<dir> AC_DATA_DIR=<data-dir> NODE_PATH=$(npm root -g) node tools/seedremote/uipass.js
+//   make demo-up SEED=seedremote                                 # :8790
+//   OUT=<dir> AC_DATA_DIR=tmp/demo NODE_PATH=$(npm root -g) node tools/seedremote/uipass.js
+//   make demo-down
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");

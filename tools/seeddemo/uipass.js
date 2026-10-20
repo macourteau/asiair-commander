@@ -38,9 +38,9 @@
 // cancelled, never run.
 //
 // Playwright lives in the GLOBAL node_modules on this machine.
-//   SEED_DIR=<data-dir> SEED_LIVE=1 go run ./tools/seeddemo
-//   make spa && go run -tags demo ./cmd/asiair-commander -data-dir <data-dir>   # :8686
+//   make demo-up SEED=seeddemo                 # live seed, -tags demo build, :8686
 //   OUT=<dir> NODE_PATH=$(npm root -g) node tools/seeddemo/uipass.js
+//   make demo-down
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");

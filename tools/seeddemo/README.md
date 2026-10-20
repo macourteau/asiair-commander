@@ -6,6 +6,9 @@ for screenshotting the SPA with realistic content.
 ```
 SEED_DIR=<data-dir> go run ./tools/seeddemo               # static: offline rigs, seeded history
 SEED_DIR=<data-dir> SEED_LIVE=1 go run ./tools/seeddemo   # live: for a -tags demo build
+make demo-up SEED=seeddemo           # live seed, -tags demo build, started on :8686
+make demo-up SEED=seeddemo TAGS=     # static seed, plain build
+make demo-down
 ```
 
 Without `SEED_LIVE` the two rigs have no GUID and sit offline; the store carries a spread of
@@ -65,9 +68,9 @@ Each mobile capture is checked for horizontal overflow from the panel or the dia
 probes are written to `devfiles-overflow-mobile.json`.
 
 ```
-SEED_DIR=<data-dir> SEED_LIVE=1 go run ./tools/seeddemo
-make spa && go run -tags demo ./cmd/asiair-commander -data-dir <data-dir>   # :8686
+make demo-up SEED=seeddemo                                     # :8686
 OUT=<out-dir> NODE_PATH=$(npm root -g) node tools/seeddemo/uipass.js
+make demo-down
 ```
 
 The pass writes to the demo devices and undoes each write through the API: the copied

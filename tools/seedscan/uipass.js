@@ -11,9 +11,10 @@
 // every round.
 //
 // Playwright lives in the GLOBAL node_modules on this machine.
-//   go run ./tools/seedscan /tmp/acscan        # foreground, answers scan_air
-//   go run ./cmd/asiair-commander --data-dir /tmp/acscan run    # :8789
-//   OUT=<dir> AC_DATA_DIR=/tmp/acscan NODE_PATH=$(npm root -g) node tools/seedscan/uipass.js
+//   go run ./tools/seedscan tmp/demo           # foreground, answers scan_air
+//   make demo-up TAGS=                         # another terminal; :8789
+//   OUT=<dir> AC_DATA_DIR=tmp/demo NODE_PATH=$(npm root -g) node tools/seedscan/uipass.js
+//   make demo-down
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");

@@ -113,23 +113,41 @@ Do not hand back frontend work unchecked. `scripts/screenshots.mjs` (Playwright 
 install, `NODE_PATH=$(npm root -g)`) captures every surface in its `SURFACES` list on mobile and
 retina desktop, plus a mobile horizontal-overflow report; add each new surface to `SURFACES`.
 
+Run the server for a pass with `make demo-up` and stop it with `make demo-down`, never with a
+hand-rolled `cmd &` and `kill $!`: a backgrounded `(cd dir && cmd) &` chain records the
+subshell's PID, so a later kill misses the server and it runs on unnoticed.
+
 ```
-make spa                                           # the binary serves internal/web/dist, not web/dist
-go run ./tools/seedmosaic <data-dir> <fits-root>   # or another seeder below
-go run ./cmd/asiair-commander -data-dir <data-dir>
+make demo-up SEED=seedremote                       # make spa, seed, build, start, wait for /healthz
 OUT=<out-dir> AC_PASSWORD=<pw> TARGET=http://localhost:<port> \
   NODE_PATH=$(npm root -g) node scripts/screenshots.mjs
+make demo-down                                     # SIGTERM, SIGKILL after 30s, verified gone
 ```
+
+`demo-up` reseeds `DEMO_DATA` (default `tmp/demo`, per checkout, gitignored) from
+`tools/<SEED>` (`SEED_ARGS=` for extra arguments; omit `SEED` to reuse the data dir), builds with
+`TAGS` (default `demo`, empty for the seeders marked plain below), starts the server in the
+background with `-pid-file`, logs to `$DEMO_DATA/server.log`, and returns only once `/healthz`
+answers on the seeded port; it fails with the log tail otherwise, and refuses a second server on
+the same data dir or a port already taken. `PORT=` moves it off the seeded port. `make
+demo-status` reports it. `demo-down` exits non-zero unless it confirmed the process gone: report
+that as a failure, with the PID, never as done. A demo build shuts itself down after 16 hours
+(`MAX_LIFETIME=` sets `-demo-max-lifetime`, `0` for unlimited), so restart a server a long
+session still needs.
 
 Each seeder under `tools/` stages one situation; its README gives arguments and password. Ports:
 
-| port | seeder |
-| ---- | ------ |
-| 8686 | `seedack`, `seeddemo` (the built-in default) |
-| 8787 | `seedmosaic`, `seedreal` |
-| 8788 | `seednight` |
-| 8789 | `seedscan` |
-| 8790 | `seedremote` (needs a `-tags demo` build) |
+| port | seeder | build |
+| ---- | ------ | ----- |
+| 8686 | `seedack` | plain |
+| 8686 | `seeddemo` (the built-in default) | demo |
+| 8787 | `seedmosaic`, `seedreal` (both `SEED_ARGS=<fits-root>`) | plain |
+| 8788 | `seednight` | plain |
+| 8789 | `seedscan` (stays in the foreground: `go run ./tools/seedscan tmp/demo` in its own terminal, then `make demo-up TAGS=`) | plain |
+| 8790 | `seedremote` | demo |
+
+A plain seeder stages offline or GUID-less rigs; a demo build answers every rig with an
+in-memory device, which would bring them online and change the state they stage.
 
 A `-tags demo` build's frames carry synthetic sky from `tools/starfield` (Gaia DR3 cones cached
 under the user cache dir; a first run needs network), so previews, thumbnails and plate solves

@@ -170,10 +170,10 @@ func main() {
 
 	fmt.Printf(`seedremote ready
   data-dir  %s
-  build     go build -tags demo -ldflags "-X main.version=$(git describe --tags --always) -X main.buildTime=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" -o <bin> ./cmd/asiair-commander
-  run       <bin> -data-dir %s        # http://localhost:%d, password 12345678
+  run       make demo-up DEMO_DATA=%s        # http://localhost:%d, password 12345678
   pass      OUT=<out-dir> AC_DATA_DIR=%s NODE_PATH=$(npm root -g) node tools/seedremote/uipass.js
-`, dir, dir, webPort, dir)
+  stop      make demo-down DEMO_DATA=%s
+`, dir, dir, webPort, dir, dir)
 }
 
 // baseConfig is the config every seeded rig and remote is added to: a fast

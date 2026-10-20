@@ -5,8 +5,9 @@
 # demo with the pinned astap_cli beside it, waits until enough rendered frames have
 # been filed and plate-solved to look like a real night, captures every surface with
 # scripts/screenshots.mjs in the light and then the dark theme, and writes the
-# curated set as WebP, each dark image named <name>-dark.webp. Every process it
-# starts is stopped on exit, and its scratch dir is removed (KEEP=1 keeps it).
+# curated set as WebP, each dark image named <name>-dark.webp. The demo server is
+# started and stopped through scripts/demo-server.sh, which waits for /healthz and
+# confirms the process is gone on exit; the scratch dir is removed (KEEP=1 keeps it).
 #
 # The frames' sky comes from tools/starfield (Gaia DR3, cached under the user cache
 # dir); the astap_cli binary and the d05 star catalog the demo solves with are cached
@@ -38,18 +39,23 @@ WORK=$(mktemp -d /tmp/acshots.XXXXXX)
 DATA="$WORK/data"
 BIN="$WORK/bin"
 RAW="$WORK/raw"
-PID=""
+STARTED=""
+demo_server() { DEMO_DATA="$DATA" BIN="$BIN/asiair-commander" scripts/demo-server.sh "$@"; }
 
 cleanup() {
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
-    wait "$PID" 2>/dev/null || true
+  local status=$?
+  # A server that cannot be confirmed gone fails the run and keeps its scratch
+  # dir, which holds the server's log and pid file.
+  if [ -n "$STARTED" ] && ! demo_server down; then
+    echo "screenshots: the demo server could not be confirmed stopped; see $WORK" >&2
+    exit 1
   fi
   if [ "${KEEP:-}" = 1 ]; then
     echo "screenshots: kept $WORK"
   else
     rm -rf "$WORK"
   fi
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -85,19 +91,18 @@ if [ -d "$ASTAP_CACHE/d05" ]; then
   ln -s "$ASTAP_CACHE/d05" "$DATA/astap/d05"
 fi
 
-echo "screenshots: starting the demo on :$PORT (log: $WORK/server.log)"
-AC_DEMO_RELEASES_URL=http://127.0.0.1:9 \
-  "$BIN/asiair-commander" run -data-dir "$DATA" >"$WORK/server.log" 2>&1 &
-PID=$!
+echo "screenshots: starting the demo on :$PORT"
+STARTED=1
+AC_DEMO_RELEASES_URL=http://127.0.0.1:9 demo_server up
 
 count() {
   sqlite3 "$DATA/state.db" "$1" 2>/dev/null || echo 0
 }
 deadline=$((SECONDS + SETTLE_TIMEOUT))
 while :; do
-  if ! kill -0 "$PID" 2>/dev/null; then
+  if ! demo_server status >/dev/null; then
     echo "screenshots: the demo exited; tail of its log:" >&2
-    tail -20 "$WORK/server.log" >&2
+    tail -20 "$DATA/server.log" >&2
     exit 1
   fi
   filed=$(count "SELECT count(*) FROM frames WHERE frame_type='LIGHT' AND state IN ('verified','deleted')")
@@ -108,7 +113,7 @@ while :; do
   fi
   if [ $SECONDS -ge $deadline ]; then
     echo "screenshots: the demo did not settle within ${SETTLE_TIMEOUT}s; recent log:" >&2
-    grep -iE "warn|error|starfield|astap|catalog" "$WORK/server.log" | tail -20 >&2
+    grep -iE "warn|error|starfield|astap|catalog" "$DATA/server.log" | tail -20 >&2
     exit 1
   fi
   sleep 10

@@ -102,6 +102,8 @@ func realMain(argv []string) int {
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	dataDirFlag := fs.String("data-dir", "", "override the data directory (config, state, logs)")
 	debug := fs.Bool("debug", false, "enable debug logging")
+	pidFile := fs.String("pid-file", "", "run: write this process's PID to this file, refuse to start while it names a running process, and remove it on shutdown")
+	demo := registerDemoFlags(fs)
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -125,7 +127,7 @@ func realMain(argv []string) int {
 	case "healthcheck":
 		return healthcheckVerb(dataDir)
 	case "run":
-		return runVerb(dataDir, *debug)
+		return runVerb(dataDir, *debug, *pidFile, demo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown verb %q; valid verbs: run, install, uninstall, healthcheck, version, remote\n", verb)
 		return 2
@@ -166,7 +168,7 @@ func controlVerb(action string) int {
 }
 
 // runVerb sets up logging and drives the app under the service manager.
-func runVerb(dataDir string, debug bool) int {
+func runVerb(dataDir string, debug bool, pidFile string, demo *demoFlags) int {
 	logger, appLog, closeLog, err := setupLogging(dataDir, debug)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "setup logging:", err)
@@ -176,7 +178,18 @@ func runVerb(dataDir string, debug bool) int {
 
 	logger.Info("asiair-commander starting", "version", version, "commit", commit, "data_dir", dataDir)
 
-	app := &commanderApp{dataDir: dataDir, logger: logger, appLog: appLog}
+	// Claimed before anything binds, so a second instance is refused here rather
+	// than after it has wandered to a fallback port.
+	if pidFile != "" {
+		release, err := claimPIDFile(pidFile, logger)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer release()
+	}
+
+	app := &commanderApp{dataDir: dataDir, logger: logger, appLog: appLog, demo: demo}
 	if err := svc.Run(serviceName, serviceDisplay, serviceDesc, app, logger); err != nil {
 		logger.Error("service exited with error", "err", err)
 		return 1
@@ -190,9 +203,14 @@ type commanderApp struct {
 	dataDir string
 	logger  *slog.Logger
 	appLog  *web.LogBuffer
+	demo    *demoFlags
 }
 
 func (a *commanderApp) Run(ctx context.Context) error {
+	// A no-op outside a `-tags demo` build; in one, ctx ends at the demo's
+	// maximum lifetime (see demo_lifetime.go).
+	ctx, cancel := a.demo.limitLifetime(ctx, a.logger)
+	defer cancel()
 	return runStack(ctx, a.dataDir, a.logger, a.appLog, nil)
 }
 

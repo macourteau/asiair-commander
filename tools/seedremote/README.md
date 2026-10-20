@@ -7,16 +7,14 @@ made by this very process. None of that can be written into config or the store,
 remote needs a second PC and a relay. This seeder stages it with no hardware and no network.
 
 ```
-go run ./tools/seedremote <data-dir>
-make spa && go build -tags demo \
-  -ldflags "-X main.version=$(git describe --tags --always) -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -o <bin> ./cmd/asiair-commander
-<bin> -data-dir <data-dir>                                   # :8790, password 12345678
-OUT=<out-dir> AC_DATA_DIR=<data-dir> NODE_PATH=$(npm root -g) node tools/seedremote/uipass.js
+make demo-up SEED=seedremote                                 # :8790, password 12345678
+OUT=<out-dir> AC_DATA_DIR=tmp/demo NODE_PATH=$(npm root -g) node tools/seedremote/uipass.js
+make demo-down
 ```
 
-The `-ldflags` matter: the stale-build notice compares the remote's build date with Commander's,
-and an unstamped build has none, so the notice never shows.
+`demo-up` builds with `-tags demo` and the Makefile's version `-ldflags`, which matter: the
+stale-build notice compares the remote's build date with Commander's, and an unstamped build has
+none, so the notice never shows.
 
 ## How it works
 

@@ -188,7 +188,7 @@ func main() {
 	}
 
 	fmt.Printf("\nseeded %d frames into %s\n", seeded, cfg.Roots.Light)
-	fmt.Printf("run: go run ./cmd/asiair-commander --data-dir %s\n", dir)
+	fmt.Printf("run: make demo-up TAGS= DEMO_DATA=%s (make demo-down stops it)\n", dir)
 	fmt.Println("then log in on :8787 with test1234, enable mosaic detection in Settings,")
 	fmt.Println("and run the Tools re-file preview.")
 }

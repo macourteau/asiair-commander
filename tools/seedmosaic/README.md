@@ -6,9 +6,13 @@ holding a mosaic that was filed flat: one top-level folder per pane (`Sadr_1-1/`
 while the mosaic was shot, and it is what the Tools page's re-file panel exists to repair.
 
 ```
-go run ./tools/seedmosaic <data-dir> <fits-root>
-make spa && go run ./cmd/asiair-commander -data-dir <data-dir>   # :8787, password test1234
+make demo-up SEED=seedmosaic SEED_ARGS=<fits-root>   # :8787, password test1234
+make demo-down                                       # when done
 ```
+
+`demo-up` runs `go run ./tools/seedmosaic <data-dir> <fits-root>` into its data dir first and
+builds a plain binary (a `-tags demo` build would bring `rig-01` online against an in-memory
+device).
 
 Then log in, turn on mosaic detection in Settings, and run the re-file preview on Tools. The
 screenshot harness works against it too (`TARGET=http://localhost:8787 AC_PASSWORD=test1234`).

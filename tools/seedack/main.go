@@ -6,8 +6,8 @@
 // whose controls are suppressed.
 //
 // NOT part of the product — a local verification aid, sibling to tools/seeddemo.
-// Usage: SEED_DIR=/tmp/ackdata go run ./tools/seedack   (login password: 12345678)
-// then: go run ./cmd/asiair-commander -data-dir /tmp/ackdata   and open http://localhost:8686.
+// Usage: make demo-up SEED=seedack   (login password: 12345678), open
+// http://localhost:8686, and stop it with make demo-down.
 package main
 
 import (
