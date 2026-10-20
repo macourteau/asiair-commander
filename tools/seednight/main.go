@@ -207,7 +207,7 @@ func main() {
 	}
 
 	fmt.Printf("\nseeded %d frames into %s\n", len(specs), cfg.Roots.Light)
-	fmt.Printf("run: go run ./cmd/asiair-commander --data-dir %s\n", dir)
+	fmt.Printf("run: make demo-up TAGS= DEMO_DATA=%s (make demo-down stops it)\n", dir)
 	fmt.Printf("then log in on :%d with 12345678, select the three %q frames on Tools,\n", cfg.WebPort, wrongTarget)
 	fmt.Printf("type %q and press Preview.\n", destTarget)
 }

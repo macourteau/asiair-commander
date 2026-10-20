@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"sync/atomic"
 
@@ -39,3 +40,14 @@ func installDemoRemotes(_ context.Context, _ string, opts supervisor.Options, _ 
 // always asks the real GitHub API. The demo variant lives in
 // demo_updatecheck.go.
 func demoReleasesURL() string { return "" }
+
+// demoFlags is empty outside a `-tags demo` build: the production binary has no
+// demo flag and no lifetime cap. The demo variant lives in demo_lifetime.go.
+type demoFlags struct{}
+
+func registerDemoFlags(*flag.FlagSet) *demoFlags { return &demoFlags{} }
+
+// limitLifetime returns ctx unchanged outside a `-tags demo` build.
+func (*demoFlags) limitLifetime(ctx context.Context, _ *slog.Logger) (context.Context, context.CancelFunc) {
+	return ctx, func() {}
+}

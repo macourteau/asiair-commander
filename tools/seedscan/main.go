@@ -153,13 +153,14 @@ func main() {
   the last with no ssid at all) — one model string between them, so the ssid is
   the only thing telling them apart
 
-Run the app against this data-dir, then drive the browser:
-  make spa && go build -o /tmp/ac ./cmd/asiair-commander && /tmp/ac -data-dir %s
+Run the app against this data-dir from another terminal, then drive the browser:
+  make demo-up TAGS= DEMO_DATA=%s
   OUT=<out-dir> AC_DATA_DIR=%s AC_PASSWORD=12345678 TARGET=http://localhost:8789 \
     NODE_PATH=$(npm root -g) node tools/seedscan/uipass.js
+  make demo-down DEMO_DATA=%s
 ^C to stop.
 `, dir, managedDev.guid, managedDev.ssid, quietMarker,
-		spareDev.guid, spareDev.ssid, namelessDev.guid, dir, dir)
+		spareDev.guid, spareDev.ssid, namelessDev.guid, dir, dir, dir)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)

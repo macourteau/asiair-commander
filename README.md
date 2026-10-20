@@ -96,6 +96,11 @@ bin/asiair-commander -data-dir ./data
 make help             # every target, with a one-line description
 ```
 
+The `run` verb (the default) takes `-data-dir <dir>` (config, state and logs), `-debug`, and
+`-pid-file <path>`, which records the server's PID, refuses to start while that file names a
+running process, and removes the file on a clean shutdown. A `-tags demo` build also takes
+`-demo-max-lifetime` (default `16h`, `0` for unlimited), after which it shuts itself down.
+
 `make installer` builds the Windows installer (it needs `makensis`), and `make notices`
 generates the licence and third-party notices for a distribution (after `make spa`). A bare
 `go build ./cmd/asiair-commander` without `make spa` works but serves a placeholder page instead
@@ -117,6 +122,7 @@ make check            # the same checks as CI's required build-test job
 make integration      # real-SMB and real-tunnel tests against a Samba container (needs Docker)
 make dev              # how to run the backend and the Vite dev server side by side
 make screenshots      # regenerate the README screenshots from a live demo run
+make demo-up SEED=seeddemo   # a background server for a UI pass; make demo-down stops it
 ```
 
 `make check` compares the recorded protocol transcripts against `CHECK_BASE` (default

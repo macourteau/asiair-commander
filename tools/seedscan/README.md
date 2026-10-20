@@ -13,11 +13,16 @@ This pair answers `scan_air` broadcasts as two fake ASIAIRs and drives the brows
 timeline.
 
 ```
-go run ./tools/seedscan <data-dir>                            # foreground; answers on UDP :4720
-make spa && go build -o /tmp/ac ./cmd/asiair-commander && /tmp/ac -data-dir <data-dir>
-OUT=<out-dir> AC_DATA_DIR=<data-dir> AC_PASSWORD=12345678 TARGET=http://localhost:8789 \
+go run ./tools/seedscan tmp/demo                              # foreground; answers on UDP :4720
+make demo-up TAGS=                                            # another terminal; plain build, :8789
+OUT=<out-dir> AC_DATA_DIR=tmp/demo AC_PASSWORD=12345678 TARGET=http://localhost:8789 \
   NODE_PATH=$(npm root -g) node tools/seedscan/uipass.js
+make demo-down
 ```
+
+The seeder stays in the foreground as the fake devices, so it is started by hand rather than
+through `SEED=`, and the server is a plain build: a `-tags demo` build would answer the rigs with
+in-memory devices instead of these.
 
 What it stages:
 

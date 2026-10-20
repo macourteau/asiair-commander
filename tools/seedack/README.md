@@ -23,17 +23,17 @@ whole flow can be exercised headlessly. The pattern generalises to any UI featur
 ## Reproduce the browser pass
 
 ```sh
-SCRATCH=/tmp/ackpass
-# 1. seed (run from the repository root)
-rm -rf "$SCRATCH/data" && SEED_DIR="$SCRATCH/data" go run ./tools/seedack
-# 2. stage the SPA into the Go embed dir, THEN build — see gotcha 1
-make spa
-go build -o "$SCRATCH/server" ./cmd/asiair-commander
-# 3. run (offline rigs are expected; acknowledge does not need the device)
-"$SCRATCH/server" -data-dir "$SCRATCH/data" &
-# 4. headless assertions + screenshots (Playwright is a global dependency, hence NODE_PATH)
-NODE_PATH=$(npm root -g) OUT="$SCRATCH" node tools/seedack/uipass.js
+# 1. seed, stage the SPA (gotcha 1), build a plain binary and start it in the
+#    background; offline rigs are expected, acknowledge does not need the device
+make demo-up SEED=seedack
+# 2. headless assertions + screenshots (Playwright is a global dependency, hence NODE_PATH)
+NODE_PATH=$(npm root -g) OUT=<out-dir> node tools/seedack/uipass.js
+# 3. stop it; a non-zero exit means the server was not confirmed gone
+make demo-down
 ```
+
+The build is plain, not `-tags demo`: a demo build answers the GUID-less rigs with in-memory
+devices and brings them online.
 
 `uipass.js` logs in, opens the missing panel on `/devices`, and asserts (13 checks):
 group button `Acknowledge all 3`; exactly two per-row Acknowledge buttons; the group

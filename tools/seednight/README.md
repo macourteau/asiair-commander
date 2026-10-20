@@ -6,10 +6,10 @@ library that exercises every arm of the preview's night resolution and drives th
 the same shape `tools/seedack` uses for the acknowledge dialog.
 
 ```
-go run ./tools/seednight <data-dir>
-make spa && go build -o /tmp/ac ./cmd/asiair-commander && /tmp/ac -data-dir <data-dir>
+make demo-up SEED=seednight                      # seeds, builds a plain binary, :8788
 OUT=<out-dir> AC_PASSWORD=12345678 TARGET=http://localhost:8788 \
   NODE_PATH=$(npm root -g) node tools/seednight/uipass.js
+make demo-down
 ```
 
 What it stages, and why each piece is there:

@@ -189,6 +189,32 @@ integration: ## Stand up the Samba/NT1 container and run the real-SMB tests, dir
 screenshots: ## Regenerate docs/screenshots/ from a live demo run (needs Playwright, sqlite3, cwebp)
 	scripts/readme-screenshots.sh
 
+# A local server for UI passes, run in the background and stopped again through
+# the PID it writes itself (scripts/demo-server.sh). DEMO_DATA is per checkout
+# and gitignored; SEED=<seeder> reseeds it from tools/<seeder> first (SEED_ARGS
+# for extra arguments). TAGS defaults to demo, except for the seeders that
+# stage offline or GUID-less rigs: a demo build answers every rig with an
+# in-memory device, which would bring their rigs online and change the state
+# they stage. PORT rewrites the seeded web_port; MAX_LIFETIME overrides a demo
+# build's 16h cap.
+DEMO_DATA ?= tmp/demo
+PLAIN_SEEDERS := seedack seedmosaic seednight seedreal seedscan
+TAGS ?= $(if $(filter $(PLAIN_SEEDERS),$(SEED)),,demo)
+DEMO_ENV = DEMO_DATA="$(DEMO_DATA)" SEED="$(SEED)" SEED_ARGS="$(SEED_ARGS)" TAGS="$(TAGS)" \
+	PORT="$(PORT)" MAX_LIFETIME="$(MAX_LIFETIME)" LDFLAGS="$(LDFLAGS)"
+
+.PHONY: demo-up
+demo-up: spa ## Build and start a background server for a UI pass (SEED=, TAGS=, PORT=, DEMO_DATA=, MAX_LIFETIME=)
+	$(DEMO_ENV) scripts/demo-server.sh up
+
+.PHONY: demo-down
+demo-down: ## Stop the demo-up server and verify it is gone
+	$(DEMO_ENV) scripts/demo-server.sh down
+
+.PHONY: demo-status
+demo-status: ## Report whether the demo-up server is running
+	$(DEMO_ENV) scripts/demo-server.sh status
+
 .PHONY: dev
 dev: ## Run the backend and the SPA dev server (two terminals, run these separately)
 	@echo "Terminal 1: go run ./cmd/asiair-commander run"
