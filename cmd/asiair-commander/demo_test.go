@@ -269,3 +269,19 @@ func TestGeneratedFramesWaitForAPipelineThatFallsBehind(t *testing.T) {
 		}
 	}
 }
+
+// Frame numbers come from one sequence shared by every rig, so a long demo passes
+// 9999 within hours; a frame past that must not reuse an earlier frame's path, or
+// the generator overwrites a file the store has already filed.
+func TestGeneratedFrameNumbersDoNotWrap(t *testing.T) {
+	r := newDemoRegistry()
+	const guid = "hl0redcat01"
+	dev := r.throttled(guid, 0)
+	staged := len(lightFiles(t, dev))
+	r.addFrame(guid, []string{"M33"}, []string{"L"})
+	r.seq.Store(10000)
+	r.addFrame(guid, []string{"M33"}, []string{"L"})
+	if got := len(lightFiles(t, dev)) - staged; got != 2 {
+		t.Errorf("frames 1 and 10001 left %d distinct files on the device, want 2", got)
+	}
+}

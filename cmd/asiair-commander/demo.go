@@ -432,9 +432,14 @@ func (r *demoRegistry) addFrame(guid string, targets, filters []string) {
 	r.track(guid, path)
 }
 
+// pad zero-pads n to at least four digits and never truncates: a wrapped number
+// would reuse an earlier frame's path.
 func pad(n int64) string {
-	s := "0000" + itoa(n)
-	return s[len(s)-4:]
+	s := itoa(n)
+	if len(s) >= 4 {
+		return s
+	}
+	return strings.Repeat("0", 4-len(s)) + s
 }
 
 func itoa(n int64) string {
