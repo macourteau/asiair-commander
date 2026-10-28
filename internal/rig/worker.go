@@ -625,8 +625,9 @@ type dismissReq struct {
 }
 
 // restoreReqKind selects which mutation a restoreReq carries. Restore/cancel and
-// the two acknowledge variants all funnel through the one channel so every frame
-// mutation runs on the worker goroutine and cannot race a pull/delete pass.
+// the acknowledge and forget variants all funnel through the one channel so every
+// frame mutation runs on the worker goroutine and cannot race a pull/delete pass
+// or a library scan.
 type restoreReqKind int
 
 const (
@@ -634,10 +635,13 @@ const (
 	restoreCancel
 	restoreAcknowledge
 	restoreAcknowledgeIDs
+	restoreForget
+	restoreForgetIDs
 )
 
 // restoreReply carries the outcome back to the caller. n is the number of rows
-// acknowledged (restoreAcknowledgeIDs only; zero on every other kind).
+// acknowledged or forgotten (restoreAcknowledgeIDs and restoreForgetIDs only; zero
+// on every other kind).
 type restoreReply struct {
 	n   int
 	err error
@@ -651,9 +655,11 @@ type restoreReply struct {
 type restoreReq struct {
 	kind    restoreReqKind
 	frameID int64
-	ids     []int64 // restoreAcknowledgeIDs only
-	dir     string  // restoreAcknowledgeIDs only, for the audit log line
-	reply   chan restoreReply
+	ids     []int64 // restoreAcknowledgeIDs and restoreForgetIDs only
+	dir     string  // restoreAcknowledgeIDs and restoreForgetIDs only, for the audit log line
+	// olderThanDays is restoreForgetIDs only, for the audit log line (0 = any age).
+	olderThanDays int
+	reply         chan restoreReply
 }
 
 // linkReq carries a synchronous link-library request onto the worker goroutine.
@@ -836,6 +842,22 @@ func (w *Worker) AcknowledgeMissingIDs(ctx context.Context, dir string, ids []in
 	return w.restoreRequest(ctx, restoreReq{kind: restoreAcknowledgeIDs, ids: ids, dir: dir, reply: make(chan restoreReply, 1)})
 }
 
+// ForgetFrame retires one leftover row (design library-reconciliation §13.4),
+// synchronously on the worker goroutine so it cannot interleave with a library
+// scan that read the row before the write and would mark it after.
+func (w *Worker) ForgetFrame(ctx context.Context, frameID int64) error {
+	_, err := w.restoreRequest(ctx, restoreReq{kind: restoreForget, frameID: frameID, reply: make(chan restoreReply, 1)})
+	return err
+}
+
+// ForgetLeftovers retires a bound set of leftover rows, returning the number
+// actually forgotten. dir ("" for the whole section) and olderThanDays (0 for any
+// age) are carried only for the audit log line.
+func (w *Worker) ForgetLeftovers(ctx context.Context, dir string, olderThanDays int, ids []int64) (int, error) {
+	return w.restoreRequest(ctx, restoreReq{kind: restoreForgetIDs, ids: ids, dir: dir,
+		olderThanDays: olderThanDays, reply: make(chan restoreReply, 1)})
+}
+
 func (w *Worker) restoreRequest(ctx context.Context, req restoreReq) (int, error) {
 	select {
 	case w.restoreReqs <- req:
@@ -850,8 +872,8 @@ func (w *Worker) restoreRequest(ctx context.Context, req restoreReq) (int, error
 	}
 }
 
-// serviceRestore applies a restore/cancel/acknowledge request on the worker
-// goroutine. n is non-zero only for the id-set acknowledge.
+// serviceRestore applies a restore/cancel/acknowledge/forget request on the worker
+// goroutine. n is non-zero only for the id-set acknowledge and forget.
 func (w *Worker) serviceRestore(ctx context.Context, req restoreReq) (int, error) {
 	switch req.kind {
 	case restoreCancel:
@@ -860,6 +882,10 @@ func (w *Worker) serviceRestore(ctx context.Context, req restoreReq) (int, error
 		return 0, w.serviceAcknowledge(ctx, req.frameID)
 	case restoreAcknowledgeIDs:
 		return w.serviceAcknowledgeIDs(ctx, req.dir, req.ids)
+	case restoreForget:
+		return 0, w.serviceForget(ctx, req.frameID)
+	case restoreForgetIDs:
+		return w.serviceForgetIDs(ctx, req.dir, req.olderThanDays, req.ids)
 	default: // restoreRequest
 		ok, err := w.store.RequestRestore(ctx, w.profileID, req.frameID, w.now().Unix())
 		if err != nil {
@@ -959,6 +985,68 @@ func (w *Worker) serviceAcknowledgeIDs(ctx context.Context, dir string, ids []in
 	return n, nil
 }
 
+// serviceForget retires one leftover row (design library-reconciliation §13.4):
+// it re-reads the row and refuses anything but this rig's marked `deleted` row
+// with no restore pending, then applies the guarded write, whose WHERE is the
+// durable backstop (I38). A write that changed nothing raced the read, so it is
+// re-classified, never reported as success.
+func (w *Worker) serviceForget(ctx context.Context, frameID int64) error {
+	f, err := w.forgetRefusal(ctx, frameID)
+	if err != nil {
+		return err
+	}
+	n, err := w.store.ForgetLeftovers(ctx, w.profileID, []int64{frameID})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := w.forgetRefusal(ctx, frameID); err != nil {
+			return err
+		}
+		return ErrNotLeftover
+	}
+	w.log.Warn("rig: operator forgot a leftover frame; a reappearing device original will be pulled again",
+		"frame", f.ID, "path", f.SourcePath, "dest", f.DestPath)
+	return nil
+}
+
+// forgetRefusal reads a row and returns the sentinel for the first Forget guard it
+// fails, or the row when it is forgettable.
+func (w *Worker) forgetRefusal(ctx context.Context, frameID int64) (*model.Frame, error) {
+	f, ok, err := w.store.GetFrameByID(ctx, frameID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || f.RigID != w.profileID {
+		return nil, ErrFrameNotFound
+	}
+	if f.MissingSeenAt == 0 || f.State != model.StateDeleted {
+		return nil, ErrNotLeftover
+	}
+	if f.RestoreRequestedAt != 0 {
+		return nil, ErrRestorePending
+	}
+	return f, nil
+}
+
+// serviceForgetIDs retires a token-bound id set, returning the count actually
+// forgotten (I40), and logs one WARN audit line naming the folder or the whole
+// section, the age scope and the count, so a bulk Forget is visible after the fact
+// (design library-reconciliation §13.4).
+func (w *Worker) serviceForgetIDs(ctx context.Context, dir string, olderThanDays int, ids []int64) (int, error) {
+	n, err := w.store.ForgetLeftovers(ctx, w.profileID, ids)
+	if err != nil {
+		return n, err
+	}
+	scope := dir
+	if scope == "" {
+		scope = "all"
+	}
+	w.log.Warn("rig: operator forgot leftover frames; a reappearing device original will be pulled again",
+		"dir", scope, "older_than_days", olderThanDays, "bound", len(ids), "count", n)
+	return n, nil
+}
+
 // ErrFrameNotMissing is returned when the target frame is not marked missing, so a
 // restore or acknowledge has nothing to do. ErrRestorePending is returned when an
 // acknowledge is refused because a restore is pending (cancel it first), and
@@ -969,6 +1057,9 @@ var (
 	ErrFrameNotMissing    = fmt.Errorf("frame is not marked missing")
 	ErrRestorePending     = errors.New("rig: a restore is pending for this frame")
 	ErrNotAcknowledgeable = errors.New("rig: held or deleted frames cannot be acknowledged")
+	// ErrNotLeftover is returned when a Forget targets a row that is not a marked
+	// `deleted` row (design library-reconciliation §13.4).
+	ErrNotLeftover = errors.New("rig: only frames already removed from the device and missing from the NAS can be forgotten")
 )
 
 // DiscardFrame dismisses one unclassified frame on the worker goroutine and

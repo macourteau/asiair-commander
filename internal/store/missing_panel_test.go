@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/macourteau/asiair-commander/internal/model"
@@ -217,5 +218,117 @@ func TestMissingGroupCountsAckable(t *testing.T) {
 	}
 	if len(left) != 1 || left[0] != (model.MissingGroup{Dir: "/lib/A", Count: 1, Ackable: 0}) {
 		t.Fatalf("leftover groups = %+v, want one /lib/A group, nothing ackable", left)
+	}
+}
+
+// design library-reconciliation I38: the Forget write changes only a rig's own
+// marked deleted rows with no restore pending. Every other row is refused by the
+// SQL guard even when its id is passed in.
+func TestForgetRefusesNonLeftovers(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	leftover := mkMissing(t, s, "rig", "d.fit", "/lib/d.fit", model.StateDeleted, 100)
+	verified := mkMissing(t, s, "rig", "v.fit", "/lib/v.fit", model.StateVerified, 100)
+	unclassified := mkMissing(t, s, "rig", "u.fit", "/lib/u.fit", model.StateUnclassified, 100)
+	held := mkMissing(t, s, "rig", "h.fit", "/lib/h.fit", model.StateHeld, 100)
+	restorePending := mkMissing(t, s, "rig", "r.fit", "/lib/r.fit", model.StateDeleted, 100)
+	if ok, err := s.RequestRestore(ctx, "rig", restorePending, 200); err != nil || !ok {
+		t.Fatalf("restore: ok=%v err=%v", ok, err)
+	}
+	otherRig := mkMissing(t, s, "other", "o.fit", "/lib/o.fit", model.StateDeleted, 100)
+	unmarked := &model.Frame{RigID: "rig", SourceShare: "Udisk", SourcePath: "n.fit",
+		Size: 1, Mtime: 1, State: model.StateDeleted, DestPath: "/lib/n.fit", SHA256: "h"}
+	if err := s.UpsertFrame(ctx, unmarked); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.ForgetLeftovers(ctx, "rig",
+		[]int64{leftover, verified, unclassified, held, restorePending, otherRig, unmarked.ID})
+	if err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("forgot %d rows, want exactly the one leftover", n)
+	}
+	got := getFrame(t, s, leftover)
+	if got.MissingSeenAt != 0 || got.MissingAckedAt != 0 || got.DestPath != "" {
+		t.Fatalf("a forgotten row must null its mark and dest_path: seen=%d acked=%d dest=%q",
+			got.MissingSeenAt, got.MissingAckedAt, got.DestPath)
+	}
+	if got.State != model.StateDeleted {
+		t.Fatalf("forget must not change state; got %s", got.State)
+	}
+	for name, id := range map[string]int64{"verified": verified, "unclassified": unclassified,
+		"held": held, "restore-pending": restorePending, "other rig": otherRig} {
+		f := getFrame(t, s, id)
+		if f.MissingSeenAt == 0 || f.DestPath == "" {
+			t.Errorf("%s row must be untouched: seen=%d dest=%q", name, f.MissingSeenAt, f.DestPath)
+		}
+	}
+	if f := getFrame(t, s, unmarked.ID); f.DestPath == "" {
+		t.Errorf("an unmarked row must keep its dest_path")
+	}
+}
+
+// ForgetLeftovers applies its guard across the 500-id batch boundary and reports
+// the rows actually changed.
+func TestForgetLeftoversBatches(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	var ids []int64
+	for i := 0; i < 501; i++ {
+		name := "f" + strconv.Itoa(i) + ".fit"
+		ids = append(ids, mkMissing(t, s, "rig", name, "/lib/"+name, model.StateDeleted, 100))
+	}
+	n, err := s.ForgetLeftovers(ctx, "rig", ids)
+	if err != nil || n != 501 {
+		t.Fatalf("forget 501: n=%d err=%v", n, err)
+	}
+	if n, err := s.ForgetLeftovers(ctx, "rig", ids); err != nil || n != 0 {
+		t.Fatalf("a second forget must change nothing: n=%d err=%v", n, err)
+	}
+}
+
+// ForgettableLeftovers selects a rig's marked deleted rows, optionally in one
+// folder (byte-exact) and older than a cutoff on missing_seen_at, and counts the
+// restore-pending ones it skips.
+func TestForgettableLeftoversScopes(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	oldA := mkMissing(t, s, "rig", "a1.fit", "/lib/A/a1.fit", model.StateDeleted, 100)
+	newA := mkMissing(t, s, "rig", "a2.fit", "/lib/A/a2.fit", model.StateDeleted, 900)
+	oldB := mkMissing(t, s, "rig", "b1.fit", "/lib/B/b1.fit", model.StateDeleted, 100)
+	caseA := mkMissing(t, s, "rig", "c1.fit", "/lib/a/c1.fit", model.StateDeleted, 100)
+	rp := mkMissing(t, s, "rig", "r.fit", "/lib/A/r.fit", model.StateDeleted, 100)
+	if ok, err := s.RequestRestore(ctx, "rig", rp, 200); err != nil || !ok {
+		t.Fatalf("restore: ok=%v err=%v", ok, err)
+	}
+	mkMissing(t, s, "rig", "v.fit", "/lib/A/v.fit", model.StateVerified, 100)
+	mkMissing(t, s, "other", "o.fit", "/lib/A/o.fit", model.StateDeleted, 100)
+
+	cases := []struct {
+		name       string
+		dir        string
+		seenBefore int64
+		want       []int64
+		restore    int
+	}{
+		{"whole section", "", 0, []int64{oldA, newA, oldB, caseA}, 1},
+		{"folder", "/lib/A", 0, []int64{oldA, newA}, 1},
+		{"case-variant folder", "/lib/a", 0, []int64{caseA}, 0},
+		{"older than", "", 500, []int64{oldA, oldB, caseA}, 1},
+		{"folder and older than", "/lib/A", 500, []int64{oldA}, 1},
+		{"cutoff is strict", "/lib/A", 100, nil, 0},
+	}
+	for _, c := range cases {
+		got, err := s.ForgettableLeftovers(ctx, "rig", c.dir, c.seenBefore)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !sameIDs(got.IDs, c.want) || got.RestorePending != c.restore {
+			t.Errorf("%s: ids=%v restore=%d, want ids=%v restore=%d", c.name, got.IDs, got.RestorePending, c.want, c.restore)
+		}
 	}
 }

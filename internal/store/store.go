@@ -118,6 +118,14 @@ type Store interface {
 	// MissingGroupCounts returns one section's per-folder count and ackable count,
 	// plus both sections' unfiltered totals (design library-reconciliation §13.2).
 	MissingGroupCounts(ctx context.Context, rigID string, section MissingSection) ([]model.MissingGroup, MissingTotals, error)
+	// ForgettableLeftovers selects the leftover ids a bulk Forget would bind, in an
+	// optional folder and older than an optional missing_seen_at cutoff, counting
+	// the restore-pending ones skipped (design library-reconciliation §13.4).
+	ForgettableLeftovers(ctx context.Context, rigID, dir string, seenBefore int64) (ForgetCandidates, error)
+	// ForgetLeftovers nulls the mark and dest_path of the given ids that are still
+	// this rig's marked deleted rows with no restore pending, returning the rows
+	// changed (design library-reconciliation §13.4).
+	ForgetLeftovers(ctx context.Context, rigID string, ids []int64) (int, error)
 	SetFrameMissing(ctx context.Context, id, at int64) error
 	ClearFrameMissing(ctx context.Context, id int64) error
 	ClearMissingUnderRoot(ctx context.Context, root string) (int, error)

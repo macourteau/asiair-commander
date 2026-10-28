@@ -329,6 +329,94 @@ func (s *sqlStore) MissingGroupCounts(ctx context.Context, rigID string, section
 	return out, totals, nil
 }
 
+// ForgetCandidates is a bulk Forget's challenge: the forgettable ids to bind to the
+// token, and the matching leftovers skipped because a restore is pending.
+type ForgetCandidates struct {
+	IDs            []int64
+	RestorePending int
+}
+
+// ForgettableLeftovers selects a rig's leftover rows (marked `deleted`) a bulk
+// Forget would retire: in dir when it is non-empty (byte-exact against
+// filepath.Dir(dest_path), as MissingUnderDir matches), and, when seenBefore is
+// positive, only those whose missing_seen_at is strictly before it. A
+// restore-pending leftover is counted, not selected: the operator's standing
+// request to get the frame back is not cancelled silently (design
+// library-reconciliation §13.4).
+func (s *sqlStore) ForgettableLeftovers(ctx context.Context, rigID, dir string, seenBefore int64) (ForgetCandidates, error) {
+	var out ForgetCandidates
+	rows, err := s.read.QueryContext(ctx,
+		`SELECT id, dest_path, missing_seen_at, restore_requested_at FROM frames
+		 WHERE rig_id=? AND state=? AND missing_seen_at IS NOT NULL
+		 ORDER BY dest_path, id`, rigID, string(model.StateDeleted))
+	if err != nil {
+		return out, fmt.Errorf("forgettable leftovers: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var dest sql.NullString
+		var seen int64
+		var restore sql.NullInt64
+		if err := rows.Scan(&id, &dest, &seen, &restore); err != nil {
+			return out, fmt.Errorf("forgettable leftover row: %w", err)
+		}
+		if dir != "" && filepath.Dir(dest.String) != dir {
+			continue
+		}
+		if seenBefore > 0 && seen >= seenBefore {
+			continue
+		}
+		if restore.Valid {
+			out.RestorePending++
+			continue
+		}
+		out.IDs = append(out.IDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("forgettable leftovers iterate: %w", err)
+	}
+	return out, nil
+}
+
+// ForgetLeftovers retires leftover rows the operator vouches no card still holds:
+// the write ResolveCulledFrame performs after a culled delete, nulling the mark,
+// any acknowledgement and dest_path, so the row leaves the panel, the next scan
+// cannot re-mark it (an empty dest_path takes it out of ScanTargets), and
+// PruneDeleted ages it out (design library-reconciliation §13.4). No file is
+// touched. The WHERE is the durable guard (I38): only this rig's marked `deleted`
+// rows with no restore pending change, whatever ids are passed. Batched in 500s
+// (mirroring AcknowledgeMissingByIDs); returns the rows actually changed.
+func (s *sqlStore) ForgetLeftovers(ctx context.Context, rigID string, ids []int64) (int, error) {
+	total := 0
+	for start := 0; start < len(ids); start += 500 {
+		end := start + 500
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, rigID)
+		for i, id := range chunk {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		res, err := s.write.ExecContext(ctx,
+			`UPDATE frames SET missing_seen_at=NULL, missing_acked_at=NULL, dest_path=NULL
+			 WHERE rig_id=? AND id IN (`+strings.Join(ph, ",")+`)
+			   AND state='deleted'
+			   AND missing_seen_at IS NOT NULL
+			   AND restore_requested_at IS NULL`, args...)
+		if err != nil {
+			return total, fmt.Errorf("forget leftovers: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+	}
+	return total, nil
+}
+
 // SetFrameMissing marks a frame missing, idempotently: a re-observation never
 // restarts a running settle clock.
 //

@@ -623,7 +623,8 @@ manager only through the `Supervisor` interface.
 | `CancelRestore(rigID, frameID)` | restore request channel | `ClearRestoreRequest`, scoped to the rig so a cancel routed through one rig cannot clear another's frame. |
 | `AcknowledgeMissing(rigID, frameID)` | restore request channel | §10.8. |
 | `AcknowledgeMissingIDs(rigID, dir, ids)` | restore request channel | §10.8; `dir` is carried only for the audit log line. |
-| `ForgetLeftovers(rigID, dir, ids)` | restore request channel | §13.4; `dir` (empty for the whole section) is carried only for the audit log line. |
+| `ForgetFrame(rigID, frameID)` | restore request channel | §13.4; the worker re-reads the row and refuses anything but a marked `deleted` row with no restore pending. |
+| `ForgetLeftovers(rigID, dir, olderThanDays, ids)` | restore request channel | §13.4; `dir` (empty for the whole section) and `olderThanDays` (0 for any age) are carried only for the audit log line. |
 
 Restore, cancel, acknowledge and forget are serviced both in the run loop and in `drainCommands`, so
 they land promptly during a long pass and an idle rig still answers. **Synchronous timeouts are a UI
@@ -812,7 +813,7 @@ contribute to are [delete-safety §6](2026-10-17-delete-safety.md).
 | I36 | A culled `unclassified` frame does not count toward the never-deletable backlog alert; a non-culled one, and every `held` or `failed` frame, does. A culled frame under an unconfirmed root never drains yet is excluded too, as verified culls are. | `TestCountNeverDeletableExcludesCulledUnclassified` |
 | I37 | The deletion query always applies `rig_id`, grace and a recorded `sha256` across **both** state branches: no cross-rig or pre-grace frame is ever returned. | `TestDeletionEligibleScopesUnclassifiedByRigAndGrace` |
 | I38 | Forget changes only a rig's own marked `deleted` rows with no restore pending, at the worker and in the SQL guard; every other row is refused. | `TestForgetRefusesNonLeftovers`, `TestServiceForgetGuards` |
-| I39 | A forgotten row is never re-marked by a later scan and is removed by `PruneDeleted`; Forget deletes no file. | `TestForgottenRowNotRemarkedAndPruned` |
+| I39 | A forgotten row is never re-marked by a later scan and is removed by `PruneDeleted`; Forget deletes no file. | `TestForgottenRowNotRemarkedAndPruned`, `TestForgottenLeftoverReadoptedWhenSourceReappears` |
 | I40 | A bulk Forget changes only the ids bound to its token, and reports the count actually changed. | `TestForgetLeftoversTokenBindsIDs` |
 
 I7–I12 concern real filesystem and encoding behaviour a fake cannot fully prove. The ones with
@@ -1380,7 +1381,8 @@ confirm alike:
    with no token. Group: every row is classified, and zero acknowledgeable rows answer 409
    `ACK_NOTHING_TO_DO`.
 5. Mint and describe: per frame `{token, expires_at, dest_path, source_path, state}`; group
-   `{token, expires_at, dir, count, dir_gone, skipped: {restore_pending, not_verified, already}}`.
+   `{token, expires_at, dir, count, dir_gone, skipped: {gone, restore_pending, not_verified, already}}`,
+   where `gone` counts `deleted` rows apart from `not_verified` (§13.3).
 
 Steps 4–5 are the challenge only. On the frame route an empty body and `{}` are both challenges,
 and on the group route `{"dir": "…"}` is: the handler branches on an empty token after step 3,
@@ -1740,8 +1742,9 @@ in the store that every panel query takes:
 
 Both filters are applied in Go after the marked rows are read, never through SQLite `LIKE`, which
 folds only ASCII and treats `%` and `_` as wildcards; paging and the section total are computed
-after filtering. The response carries the page, the filtered total, both sections' unfiltered
-totals, and the section's folder stack. Each folder entry carries `count` (its rows in the section)
+after filtering. The response carries the page, the filtered total (`total`), both sections'
+unfiltered totals (`totals: {actionable, leftover}`), the `section` it answers for, and the
+section's folder stack (`groups`). Each folder entry carries `count` (its rows in the section)
 and `ackable`: the rows the group challenge would bind (`verified`, no restore pending, not yet
 acknowledged), so the button and the challenge cannot disagree. The folder stack ignores `dir` and
 `q`: its counts describe whole folders, which is what the group actions act on, and a clicked
@@ -1800,8 +1803,8 @@ grace delete (§10.6), so Forget can put a culled frame back on the NAS but can 
 
 | Route | Response |
 |---|---|
-| `POST /api/rigs/{id}/frames/{frameId}/forget` | 204; 404 unknown rig or frame; 409 `FORGET_NOT_LEFTOVER` (not a marked `deleted` row) or `FORGET_RESTORE_PENDING` |
-| `POST /api/rigs/{id}/missing-leftovers/forget`, body `{"dir"?: "…", "older_than_days"?: n, "token"?: "…"}` | Without a token: 200 `{token, expires_at, count, skipped}`, or 409 `FORGET_NOTHING_TO_DO`; with a token: 200 `{forgotten: n}`, or 403 on a missing, wrong or expired token, or one minted for a different `dir` or `older_than_days`. No `dir` means the whole leftover section; no `older_than_days` means any age; a non-positive or non-integer age is a 400. |
+| `POST /api/rigs/{id}/frames/{frameId}/forget` | 204; 400 non-integer frame id; 404 unknown rig or frame; 409 `FORGET_NOT_LEFTOVER` (not a marked `deleted` row) or `FORGET_RESTORE_PENDING`; 202 `FORGET_QUEUED` when the worker's reply timed out (as `ACK_QUEUED`, §10.7) |
+| `POST /api/rigs/{id}/missing-leftovers/forget`, body `{"dir"?: "…", "older_than_days"?: n, "token"?: "…"}` | Without a token: 200 `{token, expires_at, count, skipped}`, or 409 `FORGET_NOTHING_TO_DO`; with a token: 200 `{forgotten: n}`, 202 `FORGET_QUEUED` when the worker's reply timed out (the token stays spendable), or 403 `FORGET_CONFIRMATION_INVALID` on a missing, wrong or expired token, or one minted for a different `dir` or `older_than_days`. No `dir` means the whole leftover section; no `older_than_days` means any age; a non-positive or non-integer age is a 400. |
 
 ### 13.5 Acceptance criteria
 

@@ -51,6 +51,11 @@ type fakeSupervisor struct {
 	restoreErr error   // when non-nil, RestoreFrame returns it for a known rig
 	ackErr     error   // when non-nil, AcknowledgeMissing[IDs] returns it for a known rig
 	ackIDs     []int64 // the ids AcknowledgeMissingIDs last received
+	forgetErr  error   // when non-nil, ForgetFrame/ForgetLeftovers return it for a known rig
+	forgetIDs  []int64 // the ids ForgetLeftovers last received
+	// forgetApply, when non-nil, stands in for the worker's write so a test can
+	// exercise the real store guard behind a bulk Forget confirm.
+	forgetApply func(rigID string, ids []int64) (int, error)
 
 	// Retarget: previews is returned verbatim by PreviewRetarget for a known rig;
 	// retargetErr, when non-nil, is returned per-frame by RetargetFrame; otherwise
@@ -151,6 +156,35 @@ func (f *fakeSupervisor) AcknowledgeMissingIDs(id, dir string, ids []int64) (int
 	f.calls = append(f.calls, "ack-ids:"+id+":"+dir+":"+strconv.Itoa(len(ids)))
 	f.ackIDs = append([]int64(nil), ids...)
 	f.mu.Unlock()
+	return len(ids), nil
+}
+func (f *fakeSupervisor) ForgetFrame(id string, frameID int64) error {
+	if !f.known[id] {
+		return ErrRigNotFound
+	}
+	if f.forgetErr != nil {
+		return f.forgetErr
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, "forget:"+id+":"+strconv.FormatInt(frameID, 10))
+	f.mu.Unlock()
+	return nil
+}
+func (f *fakeSupervisor) ForgetLeftovers(id, dir string, olderThanDays int, ids []int64) (int, error) {
+	if !f.known[id] {
+		return 0, ErrRigNotFound
+	}
+	if f.forgetErr != nil {
+		return 0, f.forgetErr
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, "forget-ids:"+id+":"+dir+":"+strconv.Itoa(olderThanDays)+":"+strconv.Itoa(len(ids)))
+	f.forgetIDs = append([]int64(nil), ids...)
+	apply := f.forgetApply
+	f.mu.Unlock()
+	if apply != nil {
+		return apply(id, ids)
+	}
 	return len(ids), nil
 }
 func (f *fakeSupervisor) RetargetFrame(id string, frameID int64, newTarget string) (model.RetargetResult, error) {
