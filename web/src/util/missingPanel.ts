@@ -31,11 +31,21 @@ export function pageCount(total: number, pageSize: number): number {
   return pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
 }
 
-/** Step back to the last page when an action emptied the one on screen. Returns
- * `f` itself when nothing changes, so a state update is a no-op. */
-export function clampPage(f: SectionFilter, total: number, pageSize: number): SectionFilter {
-  const last = pageCount(total, pageSize);
-  return f.page > last ? { ...f, page: last } : f;
+/**
+ * Bring a section's filter in line with the server's answer to it. A folder
+ * filter whose folder no longer holds any of the section's rows is cleared, so
+ * the chip never names a folder the stack no longer lists (the stack ignores the
+ * filter, so a folder still holding rows is always in `groups`). Otherwise the
+ * page becomes the one the server answered, which steps back to the last page
+ * when an action emptied the one on screen. Returns `f` itself when nothing
+ * changes, so a state update is a no-op.
+ */
+export function reconcileFilter(
+  f: SectionFilter,
+  answer: { page: number; groups: MissingGroup[] },
+): SectionFilter {
+  if (f.dir && !answer.groups.some((g) => g.dir === f.dir)) return withDir(f, "");
+  return f.page === answer.page ? f : { ...f, page: answer.page };
 }
 
 /**
@@ -70,10 +80,12 @@ export function emptyActionableText(missingWarning: boolean): string {
     : "No missing frames need action.";
 }
 
-/** The label of a leftover-section bulk Forget button. */
-export function forgetButtonLabel(scope: ForgetScope, count?: number): string {
+/** The label of a leftover-section bulk Forget button: **Forget all N** names the
+ * folder's or section's leftover count. An age scope names no count, since how
+ * many rows it covers is known only once a challenge is minted. */
+export function forgetButtonLabel(scope: ForgetScope, count: number): string {
   if (scope.older_than_days) return `Forget older than ${scope.older_than_days} days`;
-  return count === undefined ? "Forget all" : `Forget all ${count}`;
+  return `Forget all ${count}`;
 }
 
 /** What a bulk Forget's dialog says it covers, from the scope it was minted for. */

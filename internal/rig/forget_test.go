@@ -186,3 +186,60 @@ func makeLeftover(t *testing.T, h *harness) *model.Frame {
 	}
 	return got
 }
+
+// design library-reconciliation §13.4: Forget is serviced on the worker goroutine.
+// ForgetFrame and ForgetLeftovers go through the restore request channel and the
+// Run select into serviceForget and serviceForgetIDs, end to end, refusals
+// included. A per-request timeout makes broken wiring fail fast instead of
+// hanging the suite.
+func TestForgetThroughWorkerLoop(t *testing.T) {
+	h := newHarness(t, emmc, header.New())
+	ctx := context.Background()
+	one := h.seedRow(t, "one", model.StateDeleted, true)
+	a := h.seedRow(t, "a", model.StateDeleted, true)
+	b := h.seedRow(t, "b", model.StateDeleted, true)
+	ver := h.seedRow(t, "ver", model.StateVerified, true)
+	rp := h.seedRow(t, "rp", model.StateDeleted, true)
+	if ok, err := h.store.RequestRestore(ctx, "rig-01", rp, h.nowVal.Unix()); err != nil || !ok {
+		t.Fatalf("restore: ok=%v err=%v", ok, err)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { h.w.Run(runCtx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	call := func(fn func(context.Context) error) error {
+		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer reqCancel()
+		return fn(reqCtx)
+	}
+
+	if err := call(func(c context.Context) error { return h.w.ForgetFrame(c, one) }); err != nil {
+		t.Fatalf("ForgetFrame via worker loop: %v", err)
+	}
+	if err := call(func(c context.Context) error { return h.w.ForgetFrame(c, rp) }); !errors.Is(err, ErrRestorePending) {
+		t.Fatalf("ForgetFrame on a restore-pending row: got %v, want ErrRestorePending", err)
+	}
+	var n int
+	if err := call(func(c context.Context) (err error) {
+		n, err = h.w.ForgetLeftovers(c, "", 7, []int64{a, b, ver, rp})
+		return err
+	}); err != nil || n != 2 {
+		t.Fatalf("ForgetLeftovers via worker loop: n=%d err=%v, want 2", n, err)
+	}
+
+	for _, id := range []int64{one, a, b} {
+		got, _, _ := h.store.GetFrameByID(ctx, id)
+		if got.MissingSeenAt != 0 || got.DestPath != "" {
+			t.Errorf("frame %d: seen=%d dest=%q, want forgotten", id, got.MissingSeenAt, got.DestPath)
+		}
+	}
+	for _, id := range []int64{ver, rp} {
+		got, _, _ := h.store.GetFrameByID(ctx, id)
+		if got.MissingSeenAt == 0 || got.DestPath == "" {
+			t.Errorf("frame %d (%s, restore %d): a refused row must keep its mark and path",
+				id, got.State, got.RestoreRequestedAt)
+		}
+	}
+}

@@ -110,6 +110,11 @@ const shot = (page, n) => page.screenshot({ path: path.join(OUT, n), fullPage: f
     await leftovers.getByRole("button", { name: /^Forget$/ }).count() === 50 &&
     await leftovers.getByRole("button", { name: /^Restore$/ }).count() === 50 &&
     await leftovers.getByRole("button", { name: /^Acknowledge/ }).count() === 0);
+  check("the section's Forget all names the leftover total",
+    await leftovers.getByRole("button", { name: "Forget all 60", exact: true }).count() === 1);
+  const rowButtonClasses = await leftovers.locator("tbody tr").first().getByRole("button").evaluateAll((bs) => bs.map((b) => b.className));
+  check("row Forget is styled as the Restore beside it", rowButtonClasses.length === 2 && rowButtonClasses[0] === rowButtonClasses[1],
+    rowButtonClasses.join(" | "));
   check("leftover folders carry Forget all N",
     await leftovers.locator("li.missing-folder", { hasText: "IC 434" }).getByRole("button", { name: "Forget all 55" }).count() === 1);
 
@@ -145,7 +150,7 @@ const shot = (page, n) => page.screenshot({ path: path.join(OUT, n), fullPage: f
   check("Forget all on a folder empties it", await leftovers.locator("li.missing-folder", { hasText: "IC 434" }).count() === 0 &&
     /Already gone from the device \(3\)/.test(await leftSummary.innerText()), await leftSummary.innerText());
 
-  await forget(leftovers.getByRole("button", { name: "Forget all", exact: true }), "Forget 3 frames?", "11-forget-section.png");
+  await forget(leftovers.getByRole("button", { name: "Forget all 3", exact: true }), "Forget 3 frames?", "11-forget-section.png");
   await shot(page, "12-leftovers-empty.png");
   check("Forget all empties the section", /Already gone from the device \(0\)/.test(await leftSummary.innerText()) &&
     await leftovers.locator("li.missing-folder").count() === 0, await leftSummary.innerText());

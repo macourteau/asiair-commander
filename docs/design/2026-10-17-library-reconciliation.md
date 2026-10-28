@@ -1742,9 +1742,11 @@ in the store that every panel query takes:
 
 Both filters are applied in Go after the marked rows are read, never through SQLite `LIKE`, which
 folds only ASCII and treats `%` and `_` as wildcards; paging and the section total are computed
-after filtering. The response carries the page, the filtered total (`total`), both sections'
-unfiltered totals (`totals: {actionable, leftover}`), the `section` it answers for, and the
-section's folder stack (`groups`). Each folder entry carries `count` (its rows in the section)
+after filtering. A page past the last answers the last page and reports it in `page`, so an
+action that empties the page on screen never shows an empty table over rows that still exist. The
+response carries the page, the filtered total (`total`), both sections' unfiltered totals
+(`totals: {actionable, leftover}`), the `section` it answers for, and the section's folder stack
+(`groups`). Each folder entry carries `count` (its rows in the section)
 and `ackable`: the rows the group challenge would bind (`verified`, no restore pending, not yet
 acknowledged), so the button and the challenge cannot disagree. The folder stack ignores `dir` and
 `q`: its counts describe whole folders, which is what the group actions act on, and a clicked

@@ -128,6 +128,21 @@ func (s *Server) handleFrames(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not list missing frames")
 			return
 		}
+		// An action can empty the page on screen. Answer the last page instead of an
+		// empty one, and report it, so the panel never shows "nothing here" over
+		// rows that still exist while it steps back (design library-reconciliation
+		// §13.3).
+		if last := max(1, (total+framesPageSize-1)/framesPageSize); page > last {
+			s.log.Debug("web: missing panel page past the last; clamped",
+				"rig", id, "section", section, "page", page, "last", last)
+			page = last
+			rows, total, err = s.deps.Store.ListMissingFrames(r.Context(), id, filter, page-1, framesPageSize)
+			if err != nil {
+				s.log.Error("web: list missing frames failed", "rig", id, "section", section, "err", err)
+				writeError(w, http.StatusInternalServerError, "could not list missing frames")
+				return
+			}
+		}
 		groups, totals, err := s.deps.Store.MissingGroupCounts(r.Context(), id, section)
 		if err != nil {
 			s.log.Error("web: missing group counts failed", "rig", id, "section", section, "err", err)

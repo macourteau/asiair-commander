@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 type missingEnvelope struct {
 	Frames []frameDTO `json:"frames"`
+	Page   int        `json:"page"`
 	Total  int        `json:"total"`
 	Groups []struct {
 		Dir     string `json:"dir"`
@@ -169,5 +171,40 @@ func TestAcknowledgeGroupNothingToDoNamesSkips(t *testing.T) {
 	if skipped["gone"].(float64) != 2 || skipped["not_verified"].(float64) != 1 ||
 		skipped["restore_pending"].(float64) != 1 || skipped["already"].(float64) != 0 {
 		t.Fatalf("skipped = %+v, want gone 2, not_verified 1, restore_pending 1", skipped)
+	}
+}
+
+// A page past the last, as when an action empties the page on screen, answers the
+// last page and reports it, so the panel never shows an empty table over rows
+// that still exist (design library-reconciliation §13.3).
+func TestMissingPanelClampsPagePastTheLast(t *testing.T) {
+	h := newHarness(t, true)
+	h.login()
+	h.addRig("rig-1", false)
+	now := time.Now().Unix()
+	dir := filepath.Join(t.TempDir(), "M31")
+	for i := 0; i < framesPageSize+1; i++ {
+		h.seedFrameState(t, "rig-1", dir, fmt.Sprintf("d%03d", i), now, model.StateDeleted)
+	}
+
+	for _, tc := range []struct {
+		page               string
+		wantPage, wantRows int
+	}{
+		{"2", 2, 1},
+		{"3", 2, 1},
+		{"99", 2, 1},
+	} {
+		env := h.missingPanel(t, url.Values{"section": {"leftover"}, "page": {tc.page}})
+		if env.Page != tc.wantPage || len(env.Frames) != tc.wantRows || env.Total != framesPageSize+1 {
+			t.Errorf("page %s: page=%d rows=%d total=%d, want page %d with %d rows",
+				tc.page, env.Page, len(env.Frames), env.Total, tc.wantPage, tc.wantRows)
+		}
+	}
+
+	// An empty section has one (empty) page.
+	env := h.missingPanel(t, url.Values{"page": {"4"}})
+	if env.Page != 1 || len(env.Frames) != 0 || env.Total != 0 {
+		t.Errorf("empty section: page=%d rows=%d total=%d, want page 1", env.Page, len(env.Frames), env.Total)
 	}
 }

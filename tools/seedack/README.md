@@ -48,9 +48,11 @@ the table and shows a removable chip; exactly two per-row Acknowledge buttons; t
 dialog's `Delete 2 frames` title, its skipped breakdown with the leftovers counted
 apart, the `dir_gone` notice, and the deleted-not-moved copy; the per-frame dialog; the
 `Acknowledged` pill after confirm (and that row's button disappearing); in the expanded
-leftovers, a search that finds rows from the second page, **Forget older than 7 days**
-keeping the 22 recent rows, **Forget all** on a folder emptying it and on the section
-emptying the section, each dialog naming the server's count and the cost; and zero
+leftovers, the section's **Forget all 60** naming the leftover total, each row's Forget
+styled as the Restore beside it, a search that finds rows from the second page,
+**Forget older than 7 days** keeping the 22 recent rows, **Forget all** on a folder
+emptying it and on the section emptying the section, each dialog naming the server's
+count and the cost; and zero
 Acknowledge controls on the keep_originals rig. Screenshots land in `$OUT/*.png`. The
 pass acknowledges and forgets, so reseed (`make demo-down && make demo-up SEED=seedack`)
 before running it again.

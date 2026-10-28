@@ -40,7 +40,6 @@ import { FrameLightbox } from "./FrameLightbox";
 import { absoluteTime, relativeTime } from "../util/format";
 import {
   ackAllCount,
-  clampPage,
   emptyActionableText,
   forgetButtonLabel,
   forgetDoneText,
@@ -48,6 +47,7 @@ import {
   forgetTitle,
   initialSectionFilter,
   pageCount,
+  reconcileFilter,
   skippedSummary,
   withDir,
   withQuery,
@@ -145,8 +145,9 @@ function useMissingSection(rigId: string, section: MissingSection, enabled: bool
       .then((d) => {
         setData(d);
         setError(null);
-        // An action can empty the last page; step back to the new last page.
-        setFilter((f) => clampPage(f, d.total, d.page_size));
+        // The server answers the last page when an action emptied the one asked
+        // for, and the folder filter may name a folder that left the section.
+        setFilter((f) => reconcileFilter(f, d));
       })
       .catch((err: unknown) => {
         if (ctl.signal.aborted) return;
@@ -192,6 +193,9 @@ function SectionBody({
   const groups = data?.groups ?? [];
   const total = data?.total ?? 0;
   const totalPages = pageCount(total, data?.page_size ?? 0);
+  // The page the server answered, which is the last one when the page asked for
+  // was emptied by an action (until the filter adopts it).
+  const page = data?.page ?? filter.page;
 
   return (
     <div className="stack missing-section__body">
@@ -246,26 +250,26 @@ function SectionBody({
             columns={columns}
             rows={data.frames ?? []}
             getKey={(f) => f.id}
-            empty={empty}
+            empty={total === 0 ? empty : undefined}
           />
           {total > 0 && (
             <nav className="pager" aria-label={`Pages of ${name}`}>
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={filter.page <= 1}
-                onClick={() => setFilter((f) => ({ ...f, page: Math.max(1, f.page - 1) }))}
+                disabled={page <= 1}
+                onClick={() => setFilter((f) => ({ ...f, page: Math.max(1, page - 1) }))}
               >
                 Previous
               </Button>
               <span className="pager__status" aria-live="polite">
-                {total} {name} · page {filter.page} of {totalPages}
+                {total} {name} · page {page} of {totalPages}
               </span>
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={filter.page >= totalPages}
-                onClick={() => setFilter((f) => ({ ...f, page: Math.min(totalPages, f.page + 1) }))}
+                disabled={page >= totalPages}
+                onClick={() => setFilter((f) => ({ ...f, page: Math.min(totalPages, page + 1) }))}
               >
                 Next
               </Button>
@@ -589,7 +593,7 @@ export function MissingFrames({
     actionColumn((f) => (
       <Button
         size="sm"
-        variant="ghost"
+        variant="secondary"
         disabled={!!f.restore_requested_at}
         title={f.restore_requested_at ? "Cancel the pending restore first" : undefined}
         loading={busy === `forgetrow:${f.id}`}
@@ -700,7 +704,7 @@ export function MissingFrames({
                     loading={busy === forgetKey(scope)}
                     onClick={() => startForget(scope)}
                   >
-                    {forgetButtonLabel(scope)}
+                    {forgetButtonLabel(scope, leftoverTotal)}
                   </Button>
                 );
               })}

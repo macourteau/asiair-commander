@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   ackAllCount,
-  clampPage,
   emptyActionableText,
   forgetButtonLabel,
   forgetDoneText,
   forgetScopeText,
   initialSectionFilter,
   pageCount,
+  reconcileFilter,
   skippedSummary,
   withDir,
   withQuery,
@@ -32,10 +32,19 @@ describe("section filter", () => {
     expect(withQuery(f, "ha")).toBe(f);
   });
 
-  it("steps back to the last page when the one on screen emptied", () => {
-    expect(clampPage(onPage3, 60, 50)).toEqual({ ...onPage3, page: 2 });
-    expect(clampPage(onPage3, 0, 50)).toEqual({ ...onPage3, page: 1 });
-    expect(clampPage(onPage3, 150, 50)).toBe(onPage3);
+  it("adopts the page the server answered when the one on screen emptied", () => {
+    expect(reconcileFilter(onPage3, { page: 2, groups: [] })).toEqual({ ...onPage3, page: 2 });
+    expect(reconcileFilter(onPage3, { page: 3, groups: [] })).toBe(onPage3);
+  });
+
+  it("clears a folder filter whose folder left the section", () => {
+    const f = { dir: "/lib/a", q: "ha", page: 2 };
+    const a = { dir: "/lib/a", count: 1, ackable: 0 };
+    const b = { dir: "/lib/b", count: 1, ackable: 0 };
+    expect(reconcileFilter(f, { page: 2, groups: [b] })).toEqual({ dir: "", q: "ha", page: 1 });
+    expect(reconcileFilter(f, { page: 2, groups: [a, b] })).toBe(f);
+    // Byte-exact, as the server matches it: a case variant is another folder.
+    expect(reconcileFilter(f, { page: 2, groups: [{ ...a, dir: "/lib/A" }] }).dir).toBe("");
   });
 
   it("counts pages, one at least", () => {
@@ -86,8 +95,8 @@ describe("emptyActionableText", () => {
 
 describe("forget copy", () => {
   it("labels the section and folder buttons", () => {
-    expect(forgetButtonLabel({})).toBe("Forget all");
-    expect(forgetButtonLabel({ older_than_days: 7 })).toBe("Forget older than 7 days");
+    expect(forgetButtonLabel({}, 60)).toBe("Forget all 60");
+    expect(forgetButtonLabel({ older_than_days: 7 }, 60)).toBe("Forget older than 7 days");
     expect(forgetButtonLabel({ dir: "/lib/a" }, 4)).toBe("Forget all 4");
   });
 
