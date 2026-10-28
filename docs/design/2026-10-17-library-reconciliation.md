@@ -2,16 +2,17 @@
 
 **Scope.** What Commander does when the operator deletes a filed frame from the NAS by hand. It
 covers the governing principle and the three rules that make detection safe; the single
-`missing_seen_at` mark, which records an observation and never a conclusion; the library marker
-that gates every conclusion, and how a root is linked automatically; the library scan, Restore,
-and the deletion of a culled frame's device original, including the re-stamp of the settle clock
-when a deletion class is armed; Acknowledge, which waives the settle window and nothing else,
-behind a server-issued token; the cull drain that extends the deletion to proven-archived
-`unclassified` frames; and why reorganising library folders by hand is unsafe. It hosts the
-reconciliation invariants I1–I37 (§5) and the cull-drain acceptance criteria AC1, AC1b and
-AC2–AC9 (§11.6). Terms such as *proven archived*, *missing mark*, *settle window*, *cull* and
-*library marker* are defined in [overview §9](2026-10-17-overview.md); the frame lifecycle the
-delete pass belongs to is [frame-lifecycle §9](2026-10-17-frame-lifecycle.md), and the
+`missing_seen_at` mark, which records an observation and never a conclusion; the library marker that
+gates every conclusion, and how a root is linked automatically; the library scan, Restore, and the
+deletion of a culled frame's device original, including the re-stamp of the settle clock when a
+deletion class is armed; Acknowledge, which waives the settle window and nothing else, behind a
+server-issued token; the cull drain that extends the deletion to proven-archived `unclassified`
+frames; why reorganising library folders by hand is unsafe; and the missing panel's split into
+actionable rows and leftovers, with Forget (§13). It hosts the reconciliation invariants I1–I40 (§5)
+and the cull-drain acceptance criteria AC1, AC1b and AC2–AC9 (§11.6), and the missing-panel
+acceptance criteria AC-T1–AC-T6 (§13.5). Terms such as *proven archived*, *missing mark*, *settle
+window*, *cull* and *library marker* are defined in [overview §9](2026-10-17-overview.md); the frame
+lifecycle the delete pass belongs to is [frame-lifecycle §9](2026-10-17-frame-lifecycle.md), and the
 cross-cutting delete rules are [delete-safety](2026-10-17-delete-safety.md).
 
 ## 1. The problem
@@ -326,6 +327,21 @@ re-evaluated per frame either: it is a few seconds old, and the reasoning above 
 | **Fixing classification so these frames become `verified`** | Cannot rescue an already-culled frame: reclassify re-files by moving the NAS copy, which the operator deleted. Worth doing as prevention; it does not recover a stranded frame. |
 | **Draining `held` culled originals too** | `held` means the device bytes did **not** match the recorded hash; deleting could destroy the only copy of different data. Never. |
 
+#### The missing panel and Forget
+
+| Alternative | Why rejected |
+|---|---|
+| **Resolving `deleted` rows automatically when `deleted_at < missing_seen_at`** | A grace delete whose source had already vanished from a pulled card records the same ordering, and resolving it drops the mark that stops a re-pull when the card returns (I1). No column distinguishes the two (§13.1). |
+| **Hiding `deleted` rows from the panel** | Leaves the reinserted-card Restore unreachable, offers no way to clear them, and breaks the panel's superset of the power-off verdict's missing check. |
+| **Leftovers shown but never clearable** | They grow without bound (I19); a collapsed section nobody can empty only moves the clutter. |
+| **Clearing only the mark on Forget** | The next scan re-derives it from the absent file (§10.6). Forget nulls `dest_path` too. |
+| **Splitting the rows client-side within the current page, or searching on the client** | Paging still runs over the mixed set, and a client search reaches only the loaded page. |
+| **Collapsing old folders by age (`missing_display_period`)** | Age is not actionability: a leftover from last night is as inert as one from August. |
+| **Publishing which rows the device is listing, to promote them** | Changes the worker and the status payload to answer a rare case precisely; the empty-state pointer (§13.3) never misleads and costs nothing. |
+| **A leftovers caution ("the device is listing one of these") driven by `missing_warning`** | The warning usually comes from actionable rows, and it is a latch that outlives the deletes that make it stale (right after an acknowledge, or on an offline or paused rig), so the caution would claim a leftover is on the device when it is not. |
+| **A filtered Forget all (by `q`)** | Its label would change as the operator types, for a bulk write. Folder and section scopes match the counts beside them. |
+
+
 ## 4. Mechanism
 
 ### 4.1 Model and store columns
@@ -607,9 +623,10 @@ manager only through the `Supervisor` interface.
 | `CancelRestore(rigID, frameID)` | restore request channel | `ClearRestoreRequest`, scoped to the rig so a cancel routed through one rig cannot clear another's frame. |
 | `AcknowledgeMissing(rigID, frameID)` | restore request channel | §10.8. |
 | `AcknowledgeMissingIDs(rigID, dir, ids)` | restore request channel | §10.8; `dir` is carried only for the audit log line. |
+| `ForgetLeftovers(rigID, dir, ids)` | restore request channel | §13.4; `dir` (empty for the whole section) is carried only for the audit log line. |
 
-Restore, cancel and acknowledge are serviced both in the run loop and in `drainCommands`, so they
-land promptly during a long pass and an idle rig still answers. **Synchronous timeouts are a UI
+Restore, cancel, acknowledge and forget are serviced both in the run loop and in `drainCommands`, so
+they land promptly during a long pass and an idle rig still answers. **Synchronous timeouts are a UI
 contract, not a safety one.** While a frame transfer is in flight a 10 s call can time out and the
 work still be applied moments later; the UI treats a timeout as *unknown* and refreshes. Nothing in
 §2.1 depends on request latency: §2.7's second evaluation is what makes a late restore still stop a
@@ -624,7 +641,9 @@ deletion.
 | `DELETE /api/rigs/{id}/frames/{frameId}/restore` | 204; 400 non-integer frame id; 404 unknown rig; 500 store error |
 | `POST /api/rigs/{id}/frames/{frameId}/acknowledge` | §10.7 |
 | `POST /api/rigs/{id}/missing-groups/acknowledge` | §10.7 |
-| `GET /api/rigs/{id}/frames?missing=true` | the missing panel's page, with `groups: [{dir, count}]` |
+| `POST /api/rigs/{id}/frames/{frameId}/forget` | §13.4 |
+| `POST /api/rigs/{id}/missing-leftovers/forget` | §13.4 |
+| `GET /api/rigs/{id}/frames?missing=true` | the missing panel's page for one section, with `groups: [{dir, count, ackable}]` (§13.2) |
 
 Library routes use path segments rather than the colon-action convention for argument-free rig
 commands, because `link` carries a body and `scan` is a distinct resource. Mutating routes are
@@ -674,11 +693,14 @@ as "would delete".
   their filed copy removed outside Commander and are treated as deliberately culled, that their
   original leaves the device once the settle window passes, that **Restore** pulls the original
   back and holds it meanwhile, and that **Acknowledge** skips the wait for frames culled on
-  purpose. Above a flat, paged table sits an unpaged stack of directory rows (`dir · count`), each
-  with an **Acknowledge all N** button; the table pages through `?missing=true`. Columns: preview,
+  purpose. Below it the rows are split into an actionable section and a collapsed section of
+  leftovers already gone from the device, each with a search box, an unpaged stack of directory
+  rows (`dir · count`, a click filters the table) and a paged table (§13.3). Actionable folders
+  carry **Acknowledge all N** where something is acknowledgeable; leftover folders carry
+  **Forget all N**. Columns: preview,
   filed copy, type, "missing since", a status pill (Missing, Restore requested, or Acknowledged), and
-  frame actions (Restore or Cancel, and a per-row Acknowledge). On a `keep_originals` rig no
-  Acknowledge control renders, but the group counts do.
+  frame actions (Restore or Cancel, and a per-row Acknowledge or Forget). On a `keep_originals`
+  rig no Acknowledge control renders, but the group counts do.
 - **Status pill.** `missingFrameView` renders a missing frame; a pending restore takes precedence
   over acknowledged. The labels are Missing, Restore requested and Acknowledged. The Acknowledged
   pill uses the warn tone (rendered as `working`, the tone warn severity maps to), the `missing`
@@ -789,6 +811,9 @@ contribute to are [delete-safety §6](2026-10-17-delete-safety.md).
 | I35 | Per-frame acknowledge is restricted to the proven-archived set; group acknowledge stays `verified` only; `held` and `deleted` are not acknowledgeable at the worker, the mint, the SQL guard or the UI. Acknowledge waives only the settle window, so the acknowledgeable set is a superset of what is cull-deletable, which additionally requires `sha256`, grace, a confirmed root and a matching device hash. | `TestServiceAcknowledgeAcceptsUnclassifiedRefusesHeld`, `TestAcknowledgeFrameChallengeAcceptsUnclassified`, `TestAcknowledgeMissingUnclassifiedPerFrameVsGroup`; the UI layer by a manual pass |
 | I36 | A culled `unclassified` frame does not count toward the never-deletable backlog alert; a non-culled one, and every `held` or `failed` frame, does. A culled frame under an unconfirmed root never drains yet is excluded too, as verified culls are. | `TestCountNeverDeletableExcludesCulledUnclassified` |
 | I37 | The deletion query always applies `rig_id`, grace and a recorded `sha256` across **both** state branches: no cross-rig or pre-grace frame is ever returned. | `TestDeletionEligibleScopesUnclassifiedByRigAndGrace` |
+| I38 | Forget changes only a rig's own marked `deleted` rows with no restore pending, at the worker and in the SQL guard; every other row is refused. | `TestForgetRefusesNonLeftovers`, `TestServiceForgetGuards` |
+| I39 | A forgotten row is never re-marked by a later scan and is removed by `PruneDeleted`; Forget deletes no file. | `TestForgottenRowNotRemarkedAndPruned` |
+| I40 | A bulk Forget changes only the ids bound to its token, and reports the count actually changed. | `TestForgetLeftoversTokenBindsIDs` |
 
 I7–I12 concern real filesystem and encoding behaviour a fake cannot fully prove. The ones with
 dedicated tests, I8 (a case-differing filename) and I9 and I10 (linking, and auto-linking after the
@@ -1677,3 +1702,133 @@ Two facts bound the risk:
 The operator-facing guidance follows: reorganise the library with re-file or retarget, never by
 hand. A directory moved by hand is repaired by moving it back before the settle window elapses, and
 never by acknowledging its frames.
+
+## 13. Triaging the missing panel, and forgetting leftovers
+
+### 13.1 Two kinds of missing row
+
+The panel (§4.7) lists every row carrying a missing mark, and two kinds of row share it:
+
+| Kind | State | Original on the device | What the operator can do |
+|---|---|---|---|
+| **Actionable** | anything but `deleted` (`verified`, `unclassified`, `held`) | usually still present | Restore; Acknowledge where §10.3 allows |
+| **Leftover** | `deleted` | already gone | nothing that needs doing; Restore only if a card still holding the original is reinserted; Forget (§13.4) |
+
+A leftover is most often a frame whose original Commander removed after the ordinary grace period
+and whose filed copy the operator later deleted by hand. `deleted` is a scannable state, so the scan
+marks it, and `PruneDeleted` keeps it forever because a marked `deleted` row is the both-sides cull
+that guards a reinserted card (I1, I19). On a long-running install leftovers grow without bound and
+bury the few actionable rows: hundreds of rows on a dozen pages, sorted by path, with every folder
+offering **Acknowledge all N** for rows the group acknowledge refuses.
+
+Commander cannot tell an inert leftover from the one I1 protects on its own. A `deleted` row whose
+`deleted_at` precedes its `missing_seen_at` was removed from the device before its copy went
+missing, but a grace delete whose source had already vanished from a pulled card records the same
+ordering, and no column records how a row reached `deleted`. Clearing leftovers is therefore the
+operator's call, made explicitly (§13.4), never inferred.
+
+### 13.2 The panel's read path
+
+`GET /api/rigs/{id}/frames?missing=true` partitions marked rows on state alone, with one predicate
+in the store that every panel query takes:
+
+| Parameter | Meaning |
+|---|---|
+| `section` | `actionable` (default) or `leftover`; anything else is a 400 |
+| `dir` | Filter the table to one folder, matched byte-exactly against `filepath.Dir(dest_path)` as `MissingUnderDir` matches, never case-folded (§10.7) |
+| `q` | Filter the table to rows whose `dest_path` contains `q`, both sides lowercased with `strings.ToLower` |
+
+Both filters are applied in Go after the marked rows are read, never through SQLite `LIKE`, which
+folds only ASCII and treats `%` and `_` as wildcards; paging and the section total are computed
+after filtering. The response carries the page, the filtered total, both sections' unfiltered
+totals, and the section's folder stack. Each folder entry carries `count` (its rows in the section)
+and `ackable`: the rows the group challenge would bind (`verified`, no restore pending, not yet
+acknowledged), so the button and the challenge cannot disagree. The folder stack ignores `dir` and
+`q`: its counts describe whole folders, which is what the group actions act on, and a clicked
+folder stays visible beside its siblings.
+
+The union of the two sections is the unfiltered marked set, so the panel remains a superset of the
+power-off verdict's missing check (§4.7).
+
+### 13.3 The panel
+
+- **Actionable section first**, headed with its count, then a search box, the folder stack and
+  the paged table. A folder line is a button that sets `dir`; the active folder shows as a
+  removable chip. **Acknowledge all N** renders only where `ackable > 0`, names `ackable`, and
+  never renders on a `keep_originals` rig.
+- **"Already gone from the device (M)"**, a disclosure that starts collapsed. Its body opens with
+  one sentence: these frames were removed from both the device and the NAS, nothing is waiting on
+  them, Restore works only if a card still holding the original is reinserted, and Forget stops
+  tracking them. Then **Forget all M**, the same search, a folder stack with **Forget all N** per
+  folder, and the paged table with Restore and Forget per row.
+- Search text, folder filter and page are per section; a section's page resets to 1 whenever its
+  filter or search changes.
+- **An empty actionable section** says so in a sentence. While the rig's `missing_warning` is set
+  it reads instead: no frames here need action, and if the warning is still shown after
+  Commander's next check, the frame it refers to is under **Already gone from the device**. The
+  warning is raised for any marked row whose source the device lists, whatever its state
+  (`internal/rig/pull.go:278`; `decide` returns the prior row for a marked row at
+  `internal/rig/decide.go:41`), and it is a latch written only at the end of the pull walk, before
+  the delete pass (`internal/rig/status.go:127-129`), so it can outlive the deletes that make it
+  stale. The panel therefore makes no claim about which row it refers to.
+- **The group-acknowledge refusal explains itself.** The challenge counts `deleted` rows as `gone`,
+  separately from `not_verified`, and the 409 `ACK_NOTHING_TO_DO` message is built on the server
+  from the non-zero counts ("Nothing to acknowledge in this folder: 69 already removed from the
+  device, 1 restore pending"). With the button hidden at `ackable = 0` the refusal is reached only
+  through a race.
+
+### 13.4 Forget
+
+**Forget** retires leftover rows the operator vouches no card still holds. It performs the write
+§10.6 performs after a culled delete: `missing_seen_at`, `missing_acked_at` and `dest_path` are
+nulled in one statement, so the row leaves the panel, the next scan cannot re-mark it (an empty
+`dest_path` takes it out of `ScanTargets`), and `PruneDeleted` ages it out like any deleted row.
+Forget touches no file, on the NAS or the device.
+
+| Rule | Why |
+|---|---|
+| Only `state = 'deleted'` rows carrying a mark, with no restore pending, are forgettable; the guard is in the `UPDATE`'s `WHERE`, rig-scoped, applied in batches of 500 | An actionable row still has its original on the device, and clearing its mark would let the delete pass treat it as ordinary; a pending restore is the operator's other standing intent, and forgetting would cancel it silently. The operator cancels the restore first. |
+| Per row, per folder (**Forget all N** on a folder line) and for the whole section: **Forget all**, **Forget older than 7 days** and **Forget older than 28 days**. A bulk Forget takes an optional folder and an optional age in whole days, measured on `missing_seen_at` (the panel's "Missing since"); it ignores `dir` and `q` | Folder and section scopes match the counts beside them, and a filtered bulk action would need a label that changes under the operator's typing. The age scopes let an operator clear old leftovers while keeping recent ones, whose cull may still be reversed by a reinserted card. |
+| A two-step handshake: the challenge mints a token bound to the forgettable ids, with a skipped breakdown (`restore_pending`); the confirm forgets only the bound ids and returns the count actually changed | The same handshake as Acknowledge (§10.7): a set that grows between the dialog and the confirm cannot widen the write. Tokens are keyed separately from acknowledge tokens. |
+| Serviced on the rig's worker through the restore request channel, like Acknowledge (§10.8) | The library scan and the delete pass run on the worker, so Forget cannot interleave with a scan that read the row before the write and marks it after. |
+| One WARN audit line per confirmed Forget, naming the rig, the folder or section, and the count | A bulk Forget is visible after the fact. |
+
+The dialog states the cost plainly: if a card still holding one of these originals is reinserted,
+or the device is listing one right now, Commander pulls it back to the NAS on its next pass. That is
+the only consequence. A forgotten row's original is re-adopted as any frame is after an ordinary
+grace delete (§10.6), so Forget can put a culled frame back on the NAS but can never lose data.
+
+| Route | Response |
+|---|---|
+| `POST /api/rigs/{id}/frames/{frameId}/forget` | 204; 404 unknown rig or frame; 409 `FORGET_NOT_LEFTOVER` (not a marked `deleted` row) or `FORGET_RESTORE_PENDING` |
+| `POST /api/rigs/{id}/missing-leftovers/forget`, body `{"dir"?: "…", "older_than_days"?: n, "token"?: "…"}` | Without a token: 200 `{token, expires_at, count, skipped}`, or 409 `FORGET_NOTHING_TO_DO`; with a token: 200 `{forgotten: n}`, or 403 on a missing, wrong or expired token, or one minted for a different `dir` or `older_than_days`. No `dir` means the whole leftover section; no `older_than_days` means any age; a non-positive or non-integer age is a 400. |
+
+### 13.5 Acceptance criteria
+
+- **AC-T1.** Store: the two sections together equal the unfiltered marked set; totals and folder
+  counts match the paged rows; folder counts do not change under `dir` or `q`; `dir` matches
+  byte-exactly (a case-variant folder is not merged); `q` matches case-insensitively, non-ASCII
+  letters included, and treats `%` and `_` literally.
+- **AC-T2.** Web: over a fixture seeded through the real store mixing `verified`, `unclassified`,
+  `held`, `deleted`, restore-pending and acknowledged rows, each folder's `ackable` equals the
+  `count` of a real group-acknowledge challenge for that folder, with and without `q` and `dir`;
+  an invalid `section` is a 400; the 409 `ACK_NOTHING_TO_DO` message names the non-zero skip
+  counts with `gone` separate.
+- **AC-T3.** Forget (I38–I40): forgetting a marked `deleted` row nulls its mark and `dest_path`;
+  the next scan does not re-mark it; `PruneDeleted` later removes it; a `verified`,
+  `unclassified` or `held` row, an unmarked row and a restore-pending row are refused at the
+  worker and by the SQL guard; a token bound before a row gained a restore request forgets every
+  bound row but that one; `older_than_days` binds only rows whose `missing_seen_at` is older than
+  that many days; a forgotten row whose source reappears is re-adopted.
+- **AC-T4.** Vitest: the folder-line helpers in `web/src/util/`; `MissingFrames` rendered with
+  `missingWarning` set and an empty actionable section shows the pointer to the leftovers.
+- **AC-T5.** A browser pass on `tools/seedack`, extended with leftover rows across several folders
+  and one folder holding only leftovers: the actionable section leads; **Acknowledge all** appears
+  only where something is acknowledgeable and shows that count; a folder click filters the table
+  and shows a chip; search filters across pages; the leftovers start collapsed; **Forget older
+  than 7 days** leaves recent leftovers in place; **Forget all** empties a folder and then the
+  section; no horizontal overflow on mobile. The existing
+  `uipass.js` checks that expect the raw folder count ("Acknowledge all 3", button differing from
+  dialog) change to the `ackable` count.
+- **AC-T6.** `make check` and `make integration` pass (Forget extends the `web.Supervisor`
+  interface the integration tests fake).

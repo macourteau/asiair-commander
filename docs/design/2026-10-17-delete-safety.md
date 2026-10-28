@@ -425,7 +425,7 @@ the doc's name: "library-reconciliation I26", "invariant 4 in architecture §8.2
 | **Data-loss invariants** | **1–28** | **§6 of this doc** | `test/ADVERSARIAL_COVERAGE.md` |
 | Removable slots | A1–A5 | [device-identity-and-media §7.6](2026-10-17-device-identity-and-media.md) | `test/ADVERSARIAL_COVERAGE.md` |
 | Share disable | D1–D4 | [device-identity-and-media §8.3](2026-10-17-device-identity-and-media.md) | `test/ADVERSARIAL_COVERAGE.md` |
-| Reconciliation, Acknowledge, cull drain | I1–I37, with I2a, I4a, I4b, I4c, I11a, I11b | [library-reconciliation §5](2026-10-17-library-reconciliation.md) | `test/ADVERSARIAL_COVERAGE.md` |
+| Reconciliation, Acknowledge, cull drain, Forget | I1–I40, with I2a, I4a, I4b, I4c, I11a, I11b | [library-reconciliation §5](2026-10-17-library-reconciliation.md) | `test/ADVERSARIAL_COVERAGE.md` |
 | Cull-drain acceptance criteria | AC1, AC1b, AC2–AC9 | [library-reconciliation §11.6](2026-10-17-library-reconciliation.md) | — |
 | Night invariants | INV-N1–INV-N7 | [routing-and-filing §6.9](2026-10-17-routing-and-filing.md) | `test/COVERAGE.md` |
 | Retarget invariants | INV-1–INV-10 | [routing-and-filing §9.9](2026-10-17-routing-and-filing.md) | `test/COVERAGE.md` |
