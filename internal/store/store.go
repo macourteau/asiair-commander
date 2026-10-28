@@ -111,8 +111,13 @@ type Store interface {
 	// Out-of-band deletion reconciliation.
 	ScanTargets(ctx context.Context, rigID, root string, allRoots []string, fn func(dir string, frames []ScanFrame) error) error
 	FiledSamplesUnderRoot(ctx context.Context, rigID, root string, allRoots []string, limit int) ([]FiledSample, error)
-	ListMissingFrames(ctx context.Context, rigID string, page, pageSize int) ([]model.Frame, int, error)
-	MissingGroupCounts(ctx context.Context, rigID string) ([]model.MissingGroup, error)
+	// ListMissingFrames pages one section of the missing panel, filtered by folder
+	// and search text, returning the filtered total (design
+	// library-reconciliation §13.2).
+	ListMissingFrames(ctx context.Context, rigID string, filter MissingFilter, page, pageSize int) ([]model.Frame, int, error)
+	// MissingGroupCounts returns one section's per-folder count and ackable count,
+	// plus both sections' unfiltered totals (design library-reconciliation §13.2).
+	MissingGroupCounts(ctx context.Context, rigID string, section MissingSection) ([]model.MissingGroup, MissingTotals, error)
 	SetFrameMissing(ctx context.Context, id, at int64) error
 	ClearFrameMissing(ctx context.Context, id int64) error
 	ClearMissingUnderRoot(ctx context.Context, root string) (int, error)

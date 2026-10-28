@@ -12,7 +12,7 @@ import (
 // groups.length directly, and a null there crashes the page (drained rig).
 func TestMissingGroupCountsEmptyIsNonNil(t *testing.T) {
 	s := newStore(t)
-	groups, err := s.MissingGroupCounts(context.Background(), "rig-none")
+	groups, _, err := s.MissingGroupCounts(context.Background(), "rig-none", SectionActionable)
 	if err != nil {
 		t.Fatalf("MissingGroupCounts: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestMissingListingIgnoresAge(t *testing.T) {
 	// missing_display_period cutoff.
 	id := mkMissingVerified(t, s, "rig", "old.fit", "/lib/M31/old.fit", 1)
 
-	frames, total, err := s.ListMissingFrames(ctx, "rig", 0, 50)
+	frames, total, err := s.ListMissingFrames(ctx, "rig", MissingFilter{}, 0, 50)
 	if err != nil {
 		t.Fatalf("ListMissingFrames: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestMissingListingIgnoresAge(t *testing.T) {
 		t.Fatalf("an ancient missing frame must still be listed: total=%d frames=%v", total, frames)
 	}
 
-	groups, err := s.MissingGroupCounts(ctx, "rig")
+	groups, _, err := s.MissingGroupCounts(ctx, "rig", SectionActionable)
 	if err != nil {
 		t.Fatalf("MissingGroupCounts: %v", err)
 	}

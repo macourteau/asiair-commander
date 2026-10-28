@@ -275,7 +275,7 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 	}
 
 	var ids []int64
-	var skipRestore, skipNotVerified, skipAlready int
+	var skipGone, skipRestore, skipNotVerified, skipAlready int
 	for _, f := range rows {
 		// Mint-order classification (state before restore before idempotence, design
 		// library-reconciliation §10.8), so a held row is counted as not_verified
@@ -286,7 +286,12 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		// unclassified): it routes every non-verified row — including a culled
 		// unclassified quarantine frame — to skipNotVerified, so a group-ack on the flat
 		// quarantine directory drains nothing. Only the per-frame ackMintRefusal widens.
+		//
+		// A deleted row (a leftover, design library-reconciliation §13.1) is counted
+		// as gone, apart from not_verified, so the refusal can say why.
 		switch {
+		case f.State == model.StateDeleted:
+			skipGone++
 		case f.State != model.StateVerified:
 			skipNotVerified++
 		case f.RestoreRequestedAt != 0:
@@ -298,7 +303,7 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if len(ids) == 0 {
-		writeErrorCode(w, http.StatusConflict, codeAckNothingToDo, "no acknowledgeable frames in this directory")
+		writeErrorCode(w, http.StatusConflict, codeAckNothingToDo, nothingToAcknowledge(skipGone, skipNotVerified, skipRestore, skipAlready))
 		return
 	}
 
@@ -312,11 +317,37 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		"token": token, "expires_at": expires.Unix(),
 		"dir": dir, "count": len(ids), "dir_gone": s.dirGone(dir),
 		"skipped": map[string]int{
+			"gone":            skipGone,
 			"restore_pending": skipRestore,
 			"not_verified":    skipNotVerified,
 			"already":         skipAlready,
 		},
 	})
+}
+
+// nothingToAcknowledge builds the 409 ACK_NOTHING_TO_DO message from the non-zero
+// skip counts, so the refusal explains itself (design library-reconciliation
+// §13.3): "Nothing to acknowledge in this folder: 69 already removed from the
+// device, 1 restore pending."
+func nothingToAcknowledge(gone, notVerified, restorePending, already int) string {
+	var parts []string
+	for _, c := range []struct {
+		n    int
+		what string
+	}{
+		{gone, "already removed from the device"},
+		{notVerified, "not verified"},
+		{restorePending, "restore pending"},
+		{already, "already acknowledged"},
+	} {
+		if c.n > 0 {
+			parts = append(parts, strconv.Itoa(c.n)+" "+c.what)
+		}
+	}
+	if len(parts) == 0 {
+		return "Nothing to acknowledge in this folder."
+	}
+	return "Nothing to acknowledge in this folder: " + strings.Join(parts, ", ") + "."
 }
 
 // ackMintRefusal classifies why a single frame cannot be acknowledged at mint time,
