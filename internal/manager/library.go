@@ -27,6 +27,8 @@ type worker interface {
 	CancelRestore(ctx context.Context, frameID int64) error
 	AcknowledgeMissing(ctx context.Context, frameID int64) error
 	AcknowledgeMissingIDs(ctx context.Context, dir string, ids []int64) (int, error)
+	ForgetFrame(ctx context.Context, frameID int64) error
+	ForgetLeftovers(ctx context.Context, dir string, olderThanDays int, ids []int64) (int, error)
 	RetargetFrame(ctx context.Context, frameID int64, newTarget string) (model.RetargetResult, error)
 	PreviewRetarget(ctx context.Context, ids []int64, newTarget string) ([]model.RetargetPreview, error)
 	PreviewRefile(ctx context.Context, scope string) (model.RefilePreview, error)
@@ -103,6 +105,31 @@ func (m *Manager) AcknowledgeMissingIDs(rigID, dir string, ids []int64) (int, er
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return w.AcknowledgeMissingIDs(ctx, dir, ids)
+}
+
+// ForgetFrame retires one leftover row: a marked frame whose device original is
+// already gone (design library-reconciliation §13.4).
+func (m *Manager) ForgetFrame(rigID string, frameID int64) error {
+	w, err := m.workerFor(rigID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return w.ForgetFrame(ctx, frameID)
+}
+
+// ForgetLeftovers retires a token-bound set of leftover rows, returning the number
+// actually forgotten. dir and olderThanDays are carried only for the worker's
+// audit log line.
+func (m *Manager) ForgetLeftovers(rigID, dir string, olderThanDays int, ids []int64) (int, error) {
+	w, err := m.workerFor(rigID)
+	if err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return w.ForgetLeftovers(ctx, dir, olderThanDays, ids)
 }
 
 // RetargetFrame re-labels one frame to newTarget, moving its archive to the new

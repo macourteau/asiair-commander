@@ -98,6 +98,10 @@ type Supervisor interface {
 	CancelRestore(id string, frameID int64) error
 	AcknowledgeMissing(id string, frameID int64) error
 	AcknowledgeMissingIDs(id string, dir string, ids []int64) (int, error)
+	// Forgetting leftovers (design library-reconciliation §13.4): retire marked
+	// `deleted` rows. dir and olderThanDays ride along only for the audit line.
+	ForgetFrame(id string, frameID int64) error
+	ForgetLeftovers(id, dir string, olderThanDays int, ids []int64) (int, error)
 	// Frame retargeting (design routing-and-filing §9.6): PreviewRetarget is a
 	// read-only projection; RetargetFrame moves one frame's archive to the new target
 	// (a ~116 MB read+write per frame, so the Manager bounds it with a generous
@@ -439,6 +443,8 @@ func (s *Server) routes() {
 	// {idAction} command route cannot shadow these deeper paths.
 	mux.HandleFunc("POST /api/rigs/{id}/frames/{frameId}/acknowledge", s.guardWrite(s.handleAcknowledgeFrame))
 	mux.HandleFunc("POST /api/rigs/{id}/missing-groups/acknowledge", s.guardWrite(s.handleAcknowledgeGroup))
+	mux.HandleFunc("POST /api/rigs/{id}/frames/{frameId}/forget", s.guardWrite(s.handleForgetFrame))
+	mux.HandleFunc("POST /api/rigs/{id}/missing-leftovers/forget", s.guardWrite(s.handleForgetLeftovers))
 	mux.HandleFunc("GET /api/library/status", s.guardRead(s.handleLibraryStatus))
 	// Frame retargeting Tools page (design routing-and-filing §9.6): a read-only
 	// preview projection and an apply that streams one NDJSON RetargetResult per
@@ -558,6 +564,8 @@ var registeredRoutes = []string{
 	"DELETE /api/rigs/{id}/frames/{frameId}/restore",
 	"POST /api/rigs/{id}/frames/{frameId}/acknowledge",
 	"POST /api/rigs/{id}/missing-groups/acknowledge",
+	"POST /api/rigs/{id}/frames/{frameId}/forget",
+	"POST /api/rigs/{id}/missing-leftovers/forget",
 	"GET /api/library/status",
 	"POST /api/rigs/{id}/retarget/preview",
 	"POST /api/rigs/{id}/retarget/apply",

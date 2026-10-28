@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/macourteau/asiair-commander/internal/model"
+	"github.com/macourteau/asiair-commander/internal/store"
 )
 
 // frameDTO is the JSON row shape for a frame, snake_cased to mirror the frames
@@ -105,15 +106,46 @@ func (s *Server) handleFrames(w http.ResponseWriter, r *http.Request) {
 		// safe-to-power-off banner (which counts any marked-missing row, no age
 		// cutoff). missing_display_period's declutter belongs client-side (design
 		// library-reconciliation §4.5/§4.7), not as a server-side row exclusion.
-		rows, total, err := s.deps.Store.ListMissingFrames(r.Context(), id, page-1, framesPageSize)
+		// section splits the rows into actionable and leftover; dir and q narrow
+		// the table only, never the folder stack (design library-reconciliation
+		// §13.2).
+		var section store.MissingSection
+		switch raw := r.URL.Query().Get("section"); raw {
+		case "", string(store.SectionActionable):
+			section = store.SectionActionable
+		case string(store.SectionLeftover):
+			section = store.SectionLeftover
+		default:
+			writeError(w, http.StatusBadRequest, "section must be actionable or leftover")
+			return
+		}
+		filter := store.MissingFilter{
+			Section: section, Dir: r.URL.Query().Get("dir"), Q: r.URL.Query().Get("q"),
+		}
+		rows, total, err := s.deps.Store.ListMissingFrames(r.Context(), id, filter, page-1, framesPageSize)
 		if err != nil {
-			s.log.Error("web: list missing frames failed", "rig", id, "err", err)
+			s.log.Error("web: list missing frames failed", "rig", id, "section", section, "err", err)
 			writeError(w, http.StatusInternalServerError, "could not list missing frames")
 			return
 		}
-		groups, err := s.deps.Store.MissingGroupCounts(r.Context(), id)
+		// An action can empty the page on screen. Answer the last page instead of an
+		// empty one, and report it, so the panel never shows "nothing here" over
+		// rows that still exist while it steps back (design library-reconciliation
+		// §13.3).
+		if last := max(1, (total+framesPageSize-1)/framesPageSize); page > last {
+			s.log.Debug("web: missing panel page past the last; clamped",
+				"rig", id, "section", section, "page", page, "last", last)
+			page = last
+			rows, total, err = s.deps.Store.ListMissingFrames(r.Context(), id, filter, page-1, framesPageSize)
+			if err != nil {
+				s.log.Error("web: list missing frames failed", "rig", id, "section", section, "err", err)
+				writeError(w, http.StatusInternalServerError, "could not list missing frames")
+				return
+			}
+		}
+		groups, totals, err := s.deps.Store.MissingGroupCounts(r.Context(), id, section)
 		if err != nil {
-			s.log.Error("web: missing group counts failed", "rig", id, "err", err)
+			s.log.Error("web: missing group counts failed", "rig", id, "section", section, "err", err)
 			writeError(w, http.StatusInternalServerError, "could not count missing frames")
 			return
 		}
@@ -122,7 +154,8 @@ func (s *Server) handleFrames(w http.ResponseWriter, r *http.Request) {
 			frames = append(frames, toFrameDTO(f))
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"frames": frames, "page": page, "page_size": framesPageSize, "total": total, "groups": groups,
+			"frames": frames, "page": page, "page_size": framesPageSize, "total": total,
+			"section": section, "groups": groups, "totals": totals,
 		})
 		return
 	}

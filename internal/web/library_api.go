@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/rig"
@@ -26,6 +27,17 @@ const (
 	codeAckKeepOriginals       = "ACK_KEEP_ORIGINALS"
 	codeAckNothingToDo         = "ACK_NOTHING_TO_DO"
 	codeAckQueued              = "ACK_QUEUED"
+)
+
+// Machine-readable Forget refusal codes (design library-reconciliation §13.4).
+// FORGET_QUEUED, like ACK_QUEUED, rides a 202 success body: the worker applies a
+// request whose reply timed out.
+const (
+	codeForgetConfirmationInvalid = "FORGET_CONFIRMATION_INVALID"
+	codeForgetNotLeftover         = "FORGET_NOT_LEFTOVER"
+	codeForgetRestorePending      = "FORGET_RESTORE_PENDING"
+	codeForgetNothingToDo         = "FORGET_NOTHING_TO_DO"
+	codeForgetQueued              = "FORGET_QUEUED"
 )
 
 // rootLinkStatus is one configured destination root's library-link state for the
@@ -275,7 +287,7 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 	}
 
 	var ids []int64
-	var skipRestore, skipNotVerified, skipAlready int
+	var skipGone, skipRestore, skipNotVerified, skipAlready int
 	for _, f := range rows {
 		// Mint-order classification (state before restore before idempotence, design
 		// library-reconciliation §10.8), so a held row is counted as not_verified
@@ -286,7 +298,12 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		// unclassified): it routes every non-verified row — including a culled
 		// unclassified quarantine frame — to skipNotVerified, so a group-ack on the flat
 		// quarantine directory drains nothing. Only the per-frame ackMintRefusal widens.
+		//
+		// A deleted row (a leftover, design library-reconciliation §13.1) is counted
+		// as gone, apart from not_verified, so the refusal can say why.
 		switch {
+		case f.State == model.StateDeleted:
+			skipGone++
 		case f.State != model.StateVerified:
 			skipNotVerified++
 		case f.RestoreRequestedAt != 0:
@@ -298,7 +315,7 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if len(ids) == 0 {
-		writeErrorCode(w, http.StatusConflict, codeAckNothingToDo, "no acknowledgeable frames in this directory")
+		writeErrorCode(w, http.StatusConflict, codeAckNothingToDo, nothingToAcknowledge(skipGone, skipNotVerified, skipRestore, skipAlready))
 		return
 	}
 
@@ -312,11 +329,37 @@ func (s *Server) acknowledgeGroupChallenge(w http.ResponseWriter, r *http.Reques
 		"token": token, "expires_at": expires.Unix(),
 		"dir": dir, "count": len(ids), "dir_gone": s.dirGone(dir),
 		"skipped": map[string]int{
+			"gone":            skipGone,
 			"restore_pending": skipRestore,
 			"not_verified":    skipNotVerified,
 			"already":         skipAlready,
 		},
 	})
+}
+
+// nothingToAcknowledge builds the 409 ACK_NOTHING_TO_DO message from the non-zero
+// skip counts, so the refusal explains itself (design library-reconciliation
+// §13.3): "Nothing to acknowledge in this folder: 69 already removed from the
+// device, 1 restore pending."
+func nothingToAcknowledge(gone, notVerified, restorePending, already int) string {
+	var parts []string
+	for _, c := range []struct {
+		n    int
+		what string
+	}{
+		{gone, "already removed from the device"},
+		{notVerified, "not verified"},
+		{restorePending, "restore pending"},
+		{already, "already acknowledged"},
+	} {
+		if c.n > 0 {
+			parts = append(parts, strconv.Itoa(c.n)+" "+c.what)
+		}
+	}
+	if len(parts) == 0 {
+		return "Nothing to acknowledge in this folder."
+	}
+	return "Nothing to acknowledge in this folder: " + strings.Join(parts, ", ") + "."
 }
 
 // ackMintRefusal classifies why a single frame cannot be acknowledged at mint time,
@@ -399,4 +442,136 @@ func (s *Server) handleCancelRestore(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("web: cancel restore failed", "rig", id, "frame", frameID, "err", err)
 		writeError(w, http.StatusInternalServerError, "could not cancel restore")
 	}
+}
+
+// handleForgetFrame retires one leftover row (design library-reconciliation
+// §13.4). Forget deletes no file — a reappearing device original is pulled again
+// — so it needs no confirmation token; the worker re-reads the row and refuses
+// anything but a marked `deleted` row with no restore pending.
+func (s *Server) handleForgetFrame(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.currentConfig().Rig(id) == nil {
+		writeError(w, http.StatusNotFound, "no such rig")
+		return
+	}
+	frameID, err := strconv.ParseInt(r.PathValue("frameId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "frame id must be an integer")
+		return
+	}
+	err = s.deps.Supervisor.ForgetFrame(id, frameID)
+	if s.writeForgetError(w, id, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleForgetLeftovers runs the two-step Forget for the leftover section, or one
+// folder of it, optionally only rows missing for more than older_than_days (design
+// library-reconciliation §13.4). The challenge binds the forgettable ids to a token
+// keyed by (rig, dir, older_than_days); the confirm forgets only those ids, so a set
+// that grows between dialog and confirm cannot widen the write (I40).
+func (s *Server) handleForgetLeftovers(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Dir           string `json:"dir"`
+		OlderThanDays *int   `json:"older_than_days"`
+		Token         string `json:"token"`
+	}
+	// A non-integer age fails to decode into *int, so it is a 400 here.
+	if err := decodeJSON(r.Body, &body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid forget body")
+		return
+	}
+	if s.currentConfig().Rig(id) == nil {
+		writeError(w, http.StatusNotFound, "no such rig")
+		return
+	}
+	days := 0
+	if body.OlderThanDays != nil {
+		if *body.OlderThanDays <= 0 {
+			writeError(w, http.StatusBadRequest, "older_than_days must be a positive whole number")
+			return
+		}
+		days = *body.OlderThanDays
+	}
+	key := forgetLeftoversKey(id, body.Dir, days)
+
+	if body.Token == "" {
+		s.forgetLeftoversChallenge(w, r, id, body.Dir, days, key)
+		return
+	}
+
+	entry, ok := s.lookupAckToken(key, body.Token)
+	if !ok {
+		writeErrorCode(w, http.StatusForbidden, codeForgetConfirmationInvalid, "confirmation token missing, wrong, or expired")
+		return
+	}
+	n, err := s.deps.Supervisor.ForgetLeftovers(id, body.Dir, days, entry.ids)
+	if s.writeForgetError(w, id, err) {
+		return
+	}
+	s.consumeAckToken(key, body.Token)
+	writeJSON(w, http.StatusOK, map[string]any{"forgotten": n})
+}
+
+// forgetLeftoversChallenge selects the forgettable leftovers in scope, refuses with
+// FORGET_NOTHING_TO_DO when there are none, and otherwise mints a token bound to
+// them. The age cutoff is taken from the server clock at mint time, so the bound
+// set is exactly what the dialog counted.
+func (s *Server) forgetLeftoversChallenge(w http.ResponseWriter, r *http.Request, id, dir string, days int, key string) {
+	var seenBefore int64
+	if days > 0 {
+		seenBefore = s.now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	}
+	cand, err := s.deps.Store.ForgettableLeftovers(r.Context(), id, dir, seenBefore)
+	if err != nil {
+		s.log.Error("web: forgettable leftovers failed", "rig", id, "dir", dir, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not read missing frames")
+		return
+	}
+	if len(cand.IDs) == 0 {
+		msg := "Nothing to forget."
+		if cand.RestorePending > 0 {
+			msg = "Nothing to forget: " + strconv.Itoa(cand.RestorePending) + " restore pending."
+		}
+		writeErrorCode(w, http.StatusConflict, codeForgetNothingToDo, msg)
+		return
+	}
+	token, expires, err := s.mintAckToken(key, cand.IDs)
+	if err != nil {
+		s.log.Error("web: mint forget token failed", "rig", id, "dir", dir, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not issue confirmation")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": token, "expires_at": expires.Unix(), "count": len(cand.IDs),
+		"skipped": map[string]int{"restore_pending": cand.RestorePending},
+	})
+}
+
+// writeForgetError maps a supervisor Forget error to its HTTP response, returning
+// false only for a nil error. A DeadlineExceeded is not a failure: the worker
+// applies the request despite the timed-out reply, so it is a 202 FORGET_QUEUED
+// and the token stays spendable, as for acknowledge (design library-reconciliation
+// §10.7).
+func (s *Server) writeForgetError(w http.ResponseWriter, rigID string, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, context.DeadlineExceeded):
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"code": codeForgetQueued, "message": "the rig is busy; this may already have applied",
+		})
+	case errors.Is(err, s.deps.RigNotFound) || errors.Is(err, rig.ErrFrameNotFound):
+		writeError(w, http.StatusNotFound, "no such rig or frame")
+	case errors.Is(err, rig.ErrNotLeftover):
+		writeErrorCode(w, http.StatusConflict, codeForgetNotLeftover, "only frames already removed from the device can be forgotten")
+	case errors.Is(err, rig.ErrRestorePending):
+		writeErrorCode(w, http.StatusConflict, codeForgetRestorePending, "cancel the pending restore first")
+	default:
+		s.log.Error("web: forget failed", "rig", rigID, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not forget")
+	}
+	return true
 }

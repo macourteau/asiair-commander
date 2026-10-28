@@ -173,27 +173,69 @@ func (s *sqlStore) FiledSamplesUnderRoot(ctx context.Context, rigID, root string
 	return out, nil
 }
 
-// ListMissingFrames pages every missing row for the UI panel, regardless of age.
-// The panel must be a superset of the safe-to-power-off banner, which counts any
-// marked-missing row with no time cutoff; a server-side age filter here made the
-// banner open an empty panel. The missing_display_period declutter belongs
-// client-side (design library-reconciliation §4.5/§4.7), not as a server-side
-// row exclusion.
-func (s *sqlStore) ListMissingFrames(ctx context.Context, rigID string, page, pageSize int) ([]model.Frame, int, error) {
+// MissingSection is one half of the missing panel (design library-reconciliation
+// §13.1). A leftover is a marked `deleted` row, whose device original is already
+// gone; every other marked row is actionable. The zero value is the actionable
+// section, the panel's default.
+type MissingSection string
+
+const (
+	SectionActionable MissingSection = "actionable"
+	SectionLeftover   MissingSection = "leftover"
+)
+
+// inMissingSection is the one section predicate every panel query takes, so the
+// list, the folder counts and the totals cannot disagree about which half a row
+// belongs to (design library-reconciliation §13.2).
+func inMissingSection(state model.FrameState, sec MissingSection) bool {
+	return (state == model.StateDeleted) == (sec == SectionLeftover)
+}
+
+// groupAckable is the row predicate the group-acknowledge challenge binds
+// (acknowledgeGroupChallenge in internal/web, AcknowledgeMissingByIDs here):
+// verified, no restore pending, not yet acknowledged. The panel's per-folder
+// ackable count uses it so the Acknowledge all button and the challenge cannot
+// disagree (design library-reconciliation §13.2).
+func groupAckable(state model.FrameState, restoreRequestedAt, missingAckedAt int64) bool {
+	return state == model.StateVerified && restoreRequestedAt == 0 && missingAckedAt == 0
+}
+
+// MissingFilter narrows the missing panel's table to one section, optionally one
+// folder (Dir, byte-exact against filepath.Dir(dest_path), as MissingUnderDir
+// matches) and a case-insensitive substring of dest_path (Q).
+type MissingFilter struct {
+	Section MissingSection
+	Dir     string
+	Q       string
+}
+
+// MissingTotals are both sections' unfiltered row counts, for the panel headings.
+type MissingTotals struct {
+	Actionable int `json:"actionable"`
+	Leftover   int `json:"leftover"`
+}
+
+// ListMissingFrames pages one section of the missing panel, regardless of age,
+// returning the page and the filtered total. The panel must be a superset of the
+// safe-to-power-off banner, which counts any marked-missing row with no time
+// cutoff; a server-side age filter here made the banner open an empty panel. The
+// missing_display_period declutter belongs client-side (design
+// library-reconciliation §4.5/§4.7), not as a server-side row exclusion.
+//
+// The section, dir and q filters run in Go after the marked rows are read, never
+// through SQLite LIKE, which folds only ASCII and treats % and _ as wildcards;
+// paging and the total are computed after filtering (design library-reconciliation
+// §13.2).
+func (s *sqlStore) ListMissingFrames(ctx context.Context, rigID string, filter MissingFilter, page, pageSize int) ([]model.Frame, int, error) {
 	if pageSize <= 0 {
 		pageSize = 50
 	}
 	if page < 0 {
 		page = 0
 	}
-	var total int
-	if err := s.read.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM frames WHERE rig_id=? AND missing_seen_at IS NOT NULL`, rigID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count missing frames: %w", err)
-	}
 	rows, err := s.read.QueryContext(ctx,
 		`SELECT `+frameColumns+` FROM frames WHERE rig_id=? AND missing_seen_at IS NOT NULL
-		 ORDER BY dest_path LIMIT ? OFFSET ?`, rigID, pageSize, page*pageSize)
+		 ORDER BY dest_path, id`, rigID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list missing frames: %w", err)
 	}
@@ -201,19 +243,45 @@ func (s *sqlStore) ListMissingFrames(ctx context.Context, rigID string, page, pa
 	if err != nil {
 		return nil, 0, err
 	}
-	return frames, total, nil
+	q := strings.ToLower(filter.Q)
+	matched := make([]model.Frame, 0, len(frames))
+	for _, f := range frames {
+		if !inMissingSection(f.State, filter.Section) {
+			continue
+		}
+		if filter.Dir != "" && filepath.Dir(f.DestPath) != filter.Dir {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(f.DestPath), q) {
+			continue
+		}
+		matched = append(matched, f)
+	}
+	total := len(matched)
+	lo := page * pageSize
+	if lo > total {
+		lo = total
+	}
+	hi := lo + pageSize
+	if hi > total {
+		hi = total
+	}
+	return matched[lo:hi], total, nil
 }
 
-// MissingGroupCounts returns the true per-directory count of missing frames (not
-// page-local), so the panel heading is accurate for a large cull. It counts every
-// marked-missing row with no age cutoff, matching ListMissingFrames so the group
-// tallies match the paged rows. The display-period declutter belongs client-side
-// (design library-reconciliation §4.5/§4.7), not as a server-side row exclusion.
-func (s *sqlStore) MissingGroupCounts(ctx context.Context, rigID string) ([]model.MissingGroup, error) {
+// MissingGroupCounts returns one section's true per-directory counts (not
+// page-local), with each folder's ackable count, plus both sections' unfiltered
+// totals. It counts every marked-missing row with no age cutoff, matching
+// ListMissingFrames so the group tallies match the paged rows, and it ignores the
+// table's dir and q filters: its counts describe whole folders, which is what the
+// group actions act on (design library-reconciliation §13.2).
+func (s *sqlStore) MissingGroupCounts(ctx context.Context, rigID string, section MissingSection) ([]model.MissingGroup, MissingTotals, error) {
+	var totals MissingTotals
 	rows, err := s.read.QueryContext(ctx,
-		`SELECT dest_path FROM frames WHERE rig_id=? AND missing_seen_at IS NOT NULL ORDER BY dest_path`, rigID)
+		`SELECT dest_path, state, restore_requested_at, missing_acked_at FROM frames
+		 WHERE rig_id=? AND missing_seen_at IS NOT NULL ORDER BY dest_path`, rigID)
 	if err != nil {
-		return nil, fmt.Errorf("missing group counts: %w", err)
+		return nil, totals, fmt.Errorf("missing group counts: %w", err)
 	}
 	defer rows.Close()
 	// Aggregate into a map keyed by directory rather than emitting a group on every
@@ -221,25 +289,132 @@ func (s *sqlStore) MissingGroupCounts(ctx context.Context, rigID string) ([]mode
 	// dest_path, so same-dir rows can be non-adjacent (/a/b/m, /a/b/n/q, /a/b/z), and
 	// the streaming approach emitted /a/b twice with partial counts (design
 	// library-reconciliation §4.5).
-	counts := map[string]int{}
+	groups := map[string]*model.MissingGroup{}
 	for rows.Next() {
-		var dest string
-		if err := rows.Scan(&dest); err != nil {
-			return nil, fmt.Errorf("missing group row: %w", err)
+		var dest, state string
+		var restore, acked sql.NullInt64
+		if err := rows.Scan(&dest, &state, &restore, &acked); err != nil {
+			return nil, totals, fmt.Errorf("missing group row: %w", err)
 		}
-		counts[filepath.Dir(dest)]++
+		st := model.FrameState(state)
+		if inMissingSection(st, SectionLeftover) {
+			totals.Leftover++
+		} else {
+			totals.Actionable++
+		}
+		if !inMissingSection(st, section) {
+			continue
+		}
+		dir := filepath.Dir(dest)
+		g := groups[dir]
+		if g == nil {
+			g = &model.MissingGroup{Dir: dir}
+			groups[dir] = g
+		}
+		g.Count++
+		if groupAckable(st, intFromNull(restore), intFromNull(acked)) {
+			g.Ackable++
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("missing group iterate: %w", err)
+		return nil, totals, fmt.Errorf("missing group iterate: %w", err)
 	}
 	// Non-nil so an empty result marshals to a JSON [] rather than null: the UI
 	// reads groups.length directly, and a null there crashes the missing panel.
-	out := make([]model.MissingGroup, 0, len(counts))
-	for dir, n := range counts {
-		out = append(out, model.MissingGroup{Dir: dir, Count: n})
+	out := make([]model.MissingGroup, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, *g)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	return out, totals, nil
+}
+
+// ForgetCandidates is a bulk Forget's challenge: the forgettable ids to bind to the
+// token, and the matching leftovers skipped because a restore is pending.
+type ForgetCandidates struct {
+	IDs            []int64
+	RestorePending int
+}
+
+// ForgettableLeftovers selects a rig's leftover rows (marked `deleted`) a bulk
+// Forget would retire: in dir when it is non-empty (byte-exact against
+// filepath.Dir(dest_path), as MissingUnderDir matches), and, when seenBefore is
+// positive, only those whose missing_seen_at is strictly before it. A
+// restore-pending leftover is counted, not selected: the operator's standing
+// request to get the frame back is not cancelled silently (design
+// library-reconciliation §13.4).
+func (s *sqlStore) ForgettableLeftovers(ctx context.Context, rigID, dir string, seenBefore int64) (ForgetCandidates, error) {
+	var out ForgetCandidates
+	rows, err := s.read.QueryContext(ctx,
+		`SELECT id, dest_path, missing_seen_at, restore_requested_at FROM frames
+		 WHERE rig_id=? AND state=? AND missing_seen_at IS NOT NULL
+		 ORDER BY dest_path, id`, rigID, string(model.StateDeleted))
+	if err != nil {
+		return out, fmt.Errorf("forgettable leftovers: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var dest sql.NullString
+		var seen int64
+		var restore sql.NullInt64
+		if err := rows.Scan(&id, &dest, &seen, &restore); err != nil {
+			return out, fmt.Errorf("forgettable leftover row: %w", err)
+		}
+		if dir != "" && filepath.Dir(dest.String) != dir {
+			continue
+		}
+		if seenBefore > 0 && seen >= seenBefore {
+			continue
+		}
+		if restore.Valid {
+			out.RestorePending++
+			continue
+		}
+		out.IDs = append(out.IDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("forgettable leftovers iterate: %w", err)
+	}
 	return out, nil
+}
+
+// ForgetLeftovers retires leftover rows the operator vouches no card still holds:
+// the write ResolveCulledFrame performs after a culled delete, nulling the mark,
+// any acknowledgement and dest_path, so the row leaves the panel, the next scan
+// cannot re-mark it (an empty dest_path takes it out of ScanTargets), and
+// PruneDeleted ages it out (design library-reconciliation §13.4). No file is
+// touched. The WHERE is the durable guard (I38): only this rig's marked `deleted`
+// rows with no restore pending change, whatever ids are passed. Batched in 500s
+// (mirroring AcknowledgeMissingByIDs); returns the rows actually changed.
+func (s *sqlStore) ForgetLeftovers(ctx context.Context, rigID string, ids []int64) (int, error) {
+	total := 0
+	for start := 0; start < len(ids); start += 500 {
+		end := start + 500
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, rigID)
+		for i, id := range chunk {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		res, err := s.write.ExecContext(ctx,
+			`UPDATE frames SET missing_seen_at=NULL, missing_acked_at=NULL, dest_path=NULL
+			 WHERE rig_id=? AND id IN (`+strings.Join(ph, ",")+`)
+			   AND state='deleted'
+			   AND missing_seen_at IS NOT NULL
+			   AND restore_requested_at IS NULL`, args...)
+		if err != nil {
+			return total, fmt.Errorf("forget leftovers: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+	}
+	return total, nil
 }
 
 // SetFrameMissing marks a frame missing, idempotently: a re-observation never

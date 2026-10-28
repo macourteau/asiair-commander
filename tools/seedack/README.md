@@ -1,8 +1,9 @@
-# seedack — headless UI-pass harness for acknowledge-culled-frames
+# seedack — headless UI-pass harness for the missing panel
 
-A local verification aid (sibling to `tools/seeddemo`) for the Acknowledge feature
+A local verification aid (sibling to `tools/seeddemo`) for the missing panel's Acknowledge,
+triage and Forget
 ([`docs/design/2026-10-17-library-reconciliation.md`](../../docs/design/2026-10-17-library-reconciliation.md)
-§10). It stands up a real,
+§10, §13). It stands up a real,
 fully-wired Commander — web server, manager, worker goroutines, sqlite store — with
 no ASIAIR hardware, seeded into exactly the frame states the UI pass needs, so the
 whole flow can be exercised headlessly. The pattern generalises to any UI feature.
@@ -12,11 +13,16 @@ whole flow can be exercised headlessly. The pattern generalises to any UI featur
 `SEED_DIR=<dir> go run ./tools/seedack` writes a throwaway data dir (`config.yaml` +
 `state.db`, web_port 8686, login password `12345678`) with two managed rigs:
 
-- **rig-fra** (`keep_originals: false`) — one directory (`NGC 7000/NIGHT_3`) holding
-  two verified-missing frames (acknowledgeable) and one **held** missing frame (not).
-  This exercises the deliberate mismatch between the group button's raw count (**3**)
-  and the dialog's acknowledgeable count (**2** + a `skipped: {not_verified: 1}`
-  breakdown), and proves the held row offers no per-row control.
+- **rig-fra** (`keep_originals: false`) — actionable rows in two folders:
+  `NGC 7000/NIGHT_3` holds two verified-missing frames (acknowledgeable) and one
+  **held** missing frame (not), so the folder counts **3** while **Acknowledge all 2**
+  and the dialog name the acknowledgeable **2** (with a `skipped` breakdown), and the
+  held row offers no per-row control; `M31/NIGHT_2` holds one held missing frame, a
+  folder with no Acknowledge all. Leftovers (marked `deleted` rows): 2 in
+  `NGC 7000/NIGHT_3`, 3 in `M42/NIGHT_4` and 55 in `IC 434/NIGHT_1`, which holds only
+  leftovers and spills the section onto a second page. Their "missing since" ages
+  give 22 rows under 7 days, 20 between 7 and 28, and 18 over 28, so **Forget older
+  than 7 days** binds 38 and **Forget older than 28 days** 18.
 - **rig-keep** (`keep_originals: true`) — one verified-missing frame. The group count
   still renders, but every Acknowledge control is suppressed.
 
@@ -35,12 +41,21 @@ make demo-down
 The build is plain, not `-tags demo`: a demo build answers the GUID-less rigs with in-memory
 devices and brings them online.
 
-`uipass.js` logs in, opens the missing panel on `/devices`, and asserts (13 checks):
-group button `Acknowledge all 3`; exactly two per-row Acknowledge buttons; the group
-dialog's `Delete 2 frames` title, `Not included: 1 not verified`, the `dir_gone`
-notice, and the deleted-not-moved copy; the per-frame dialog; the `Acknowledged` pill
-after confirm (and that row's button disappearing); and zero Acknowledge controls on
-the keep_originals rig. Screenshots land in `$OUT/0*.png`.
+`uipass.js` logs in, opens the missing panel on `/devices`, and asserts: the actionable
+section leads and the leftovers start collapsed; the group button reads
+`Acknowledge all 2` and only where something is acknowledgeable; a folder click filters
+the table and shows a removable chip; exactly two per-row Acknowledge buttons; the group
+dialog's `Delete 2 frames` title, its skipped breakdown with the leftovers counted
+apart, the `dir_gone` notice, and the deleted-not-moved copy; the per-frame dialog; the
+`Acknowledged` pill after confirm (and that row's button disappearing); in the expanded
+leftovers, the section's **Forget all 60** naming the leftover total, each row's Forget
+styled as the Restore beside it, a search that finds rows from the second page,
+**Forget older than 7 days** keeping the 22 recent rows, **Forget all** on a folder
+emptying it and on the section emptying the section, each dialog naming the server's
+count and the cost; and zero
+Acknowledge controls on the keep_originals rig. Screenshots land in `$OUT/*.png`. The
+pass acknowledges and forgets, so reseed (`make demo-down && make demo-up SEED=seedack`)
+before running it again.
 
 The server-side handshake (challenge → confirm → pill, token replay → 403
 `ACK_CONFIRMATION_INVALID`, held → 409 `ACK_NOT_VERIFIED`, keep_originals → 409

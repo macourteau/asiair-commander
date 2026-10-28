@@ -1,9 +1,12 @@
 // Command seedack writes a throwaway data dir tailored to a browser/UI pass of the
-// acknowledge-culled-frames feature (design library-reconciliation §10).
+// missing panel: acknowledging culled frames (design library-reconciliation §10)
+// and triaging and forgetting leftovers (§13).
 // It seeds one normal rig with a verified-missing group — plus a held missing row in
-// the same directory, so the group button's raw count (3) differs from the dialog's
-// acknowledgeable count (2) with a skipped breakdown — and one keep_originals rig
-// whose controls are suppressed.
+// the same directory, so the folder counts 3 rows of which the button and dialog
+// name the 2 acknowledgeable — a second actionable folder with nothing
+// acknowledgeable, and 60 leftovers (marked `deleted` rows) across three folders,
+// one of them leftovers only, aged so the 7- and 28-day Forget scopes differ; and
+// one keep_originals rig whose controls are suppressed.
 //
 // NOT part of the product — a local verification aid, sibling to tools/seeddemo.
 // Usage: make demo-up SEED=seedack   (login password: 12345678), open
@@ -73,19 +76,39 @@ func main() {
 		state             model.FrameState
 		night             int64
 		missing           bool
+		// missingAge is how long ago the row was marked missing; zero means 5
+		// minutes, the actionable rows' age.
+		missingAge time.Duration
 	}
+	const day = 24 * time.Hour
 	specs := []spec{
 		// rig-fra, NGC 7000 / NIGHT_3: two verified-missing (acknowledgeable) + one
 		// held-missing (same dir, NOT acknowledgeable) → group button "all 3",
 		// dialog count 2, skipped {not_verified:1}; the held row shows no control.
-		{"rig-fra", "NGC 7000", "Ha", model.StateVerified, 3, true},
-		{"rig-fra", "NGC 7000", "OIII", model.StateVerified, 3, true},
-		{"rig-fra", "NGC 7000", "SII", model.StateHeld, 3, true},
-		// rig-fra, M31 / NIGHT_2: verified but present (not missing) → not in panel.
-		{"rig-fra", "M31", "L", model.StateVerified, 2, false},
+		{"rig-fra", "NGC 7000", "Ha", model.StateVerified, 3, true, 0},
+		{"rig-fra", "NGC 7000", "OIII", model.StateVerified, 3, true, 0},
+		{"rig-fra", "NGC 7000", "SII", model.StateHeld, 3, true, 0},
+		// rig-fra, M31 / NIGHT_2: one verified but present (not missing) → not in the
+		// panel, and one held-missing → an actionable folder with no Acknowledge all.
+		{"rig-fra", "M31", "L", model.StateVerified, 2, false, 0},
+		{"rig-fra", "M31", "R", model.StateHeld, 2, true, 0},
 		// rig-keep, IC 1805 / NIGHT_5: verified-missing but keep_originals → count
 		// shown in the group stack, but no button, and the row shows no control.
-		{"rig-keep", "IC 1805", "Ha", model.StateVerified, 5, true},
+		{"rig-keep", "IC 1805", "Ha", model.StateVerified, 5, true, 0},
+		// rig-fra leftovers: NGC 7000 / NIGHT_3 shares its folder with actionable
+		// rows; M42 / NIGHT_4 sorts after IC 434 so it lands on the second page.
+		{"rig-fra", "NGC 7000", "Ha", model.StateDeleted, 3, true, 2 * day},
+		{"rig-fra", "NGC 7000", "OIII", model.StateDeleted, 3, true, 3 * day},
+		{"rig-fra", "M42", "L", model.StateDeleted, 4, true, 1 * day},
+		{"rig-fra", "M42", "R", model.StateDeleted, 4, true, 10 * day},
+		{"rig-fra", "M42", "G", model.StateDeleted, 4, true, 20 * day},
+	}
+	// rig-fra, IC 434 / NIGHT_1: a folder holding only leftovers, more than a page
+	// of them, aged 1, 14 and 45 days in turn. With the five above the section holds
+	// 60 rows: 22 under 7 days old, 20 between 7 and 28, 18 over 28.
+	for i := 0; i < 55; i++ {
+		age := []time.Duration{1 * day, 14 * day, 45 * day}[i%3]
+		specs = append(specs, spec{"rig-fra", "IC 434", "Ha", model.StateDeleted, 1, true, age})
 	}
 	for i, s := range specs {
 		mt := now.Add(-time.Duration((i+1)*7) * time.Minute)
@@ -111,9 +134,17 @@ func main() {
 			State:         s.state,
 			PulledAt:      mt.Unix(),
 		}
+		if s.state == model.StateDeleted {
+			// A leftover's original went first, then its filed copy (§13.1).
+			f.DeletedAt = now.Add(-s.missingAge - time.Hour).Unix()
+		}
 		must(st.UpsertFrame(ctx, f))
 		if s.missing {
-			must(st.SetFrameMissing(ctx, f.ID, now.Add(-5*time.Minute).Unix()))
+			age := s.missingAge
+			if age == 0 {
+				age = 5 * time.Minute
+			}
+			must(st.SetFrameMissing(ctx, f.ID, now.Add(-age).Unix()))
 		}
 	}
 	fmt.Printf("seeded %d frames into %s (web_port %d, login 12345678)\n", len(specs), dir, cfg.WebPort)

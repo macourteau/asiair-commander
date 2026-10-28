@@ -50,6 +50,10 @@ func (setupSupervisor) AcknowledgeMissing(string, int64) error { return nil }
 func (setupSupervisor) AcknowledgeMissingIDs(string, string, []int64) (int, error) {
 	return 0, nil
 }
+func (setupSupervisor) ForgetFrame(string, int64) error { return nil }
+func (setupSupervisor) ForgetLeftovers(string, string, int, []int64) (int, error) {
+	return 0, nil
+}
 func (setupSupervisor) RetargetFrame(_ string, frameID int64, _ string) (model.RetargetResult, error) {
 	return model.RetargetResult{FrameID: frameID, Status: "retargeted"}, nil
 }

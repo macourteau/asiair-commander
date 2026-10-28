@@ -318,11 +318,14 @@ type RootScanResult struct {
 	UnscannedDirs int      `json:"unscanned_dirs"`
 }
 
-// MissingGroup is a true per-directory count of missing frames, for the panel
-// heading (not page-local).
+// MissingGroup is a true per-directory count of one missing-panel section's
+// frames, for the folder stack (not page-local). Ackable is how many of them the
+// group-acknowledge challenge would bind, so the button and the challenge agree
+// (design library-reconciliation §13.2).
 type MissingGroup struct {
-	Dir   string `json:"dir"`
-	Count int    `json:"count"`
+	Dir     string `json:"dir"`
+	Count   int    `json:"count"`
+	Ackable int    `json:"ackable"`
 }
 
 // Snapshot is the single immutable whole-fleet value pushed over SSE

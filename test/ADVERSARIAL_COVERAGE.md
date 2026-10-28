@@ -165,3 +165,17 @@ in `internal/store` pins the fresh schema. The UI layer of
 I35 (the per-frame Acknowledge control and the "Acknowledged" pill covering
 unclassified frames, and the culled frame excluded from the unclassified view) has no
 automated proof; it is verified by a manual browser pass (`docs/design/2026-10-17-library-reconciliation.md` AC6/AC9).
+
+## Forgetting leftovers
+
+Each Forget invariant (`docs/design/2026-10-17-library-reconciliation.md` §5, §13.4) mapped to
+its proving test. Forget retires a leftover — a marked `deleted` row whose device original is
+already gone — by nulling its mark and `dest_path`, so it leaves the panel, is not re-marked,
+and ages out through `PruneDeleted`. It deletes no file; a device original that reappears is
+re-adopted and pulled like any frame after a grace delete.
+
+| # | Invariant | Proven by | Package |
+|---|-----------|-----------|---------|
+| I38 | Forget changes only a rig's own marked `deleted` rows with no restore pending, at the worker and in the SQL guard; every other row is refused. | `TestForgetRefusesNonLeftovers`, `TestServiceForgetGuards` | `internal/store`, `internal/rig` |
+| I39 | A forgotten row is never re-marked by a later scan and is removed by `PruneDeleted`; Forget deletes no file. | `TestForgottenRowNotRemarkedAndPruned`, `TestForgottenLeftoverReadoptedWhenSourceReappears` | `internal/rig` |
+| I40 | A bulk Forget changes only the ids bound to its token, and reports the count actually changed. | `TestForgetLeftoversTokenBindsIDs` | `internal/web` |

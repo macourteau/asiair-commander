@@ -373,7 +373,7 @@ func TestMissingGroupCountsAggregatesNonAdjacentDirs(t *testing.T) {
 	mkMissingVerified(t, s, "rig", "q.fit", "/a/b/n/q.fit", 1000)
 	mkMissingVerified(t, s, "rig", "z.fit", "/a/b/z.fit", 1000)
 
-	groups, err := s.MissingGroupCounts(ctx, "rig")
+	groups, _, err := s.MissingGroupCounts(ctx, "rig", SectionActionable)
 	if err != nil {
 		t.Fatalf("group counts: %v", err)
 	}

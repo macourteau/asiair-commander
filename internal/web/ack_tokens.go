@@ -43,6 +43,15 @@ func ackGroupKey(rigID, dir string) string {
 	return "d|" + strconv.Quote(rigID) + "|" + strconv.Quote(dir)
 }
 
+// forgetLeftoversKey scopes a bulk Forget token to one (rig, dir, older_than_days),
+// in its own "l|" namespace so it can never satisfy an acknowledge confirm. dir is
+// "" for the whole leftover section and days 0 for any age; a token minted for one
+// scope is refused for another (design library-reconciliation §13.4). Segments are
+// quoted for the reason ackGroupKey gives.
+func forgetLeftoversKey(rigID, dir string, days int) string {
+	return "l|" + strconv.Quote(rigID) + "|" + strconv.Quote(dir) + "|" + strconv.Itoa(days)
+}
+
 // mintAckToken issues a fresh token for key, binding ids (nil for a single frame),
 // and returns it with its expiry. Each mint sweeps expired entries; if the map is
 // still at ackTokenMax the earliest-expiring entry is evicted. Re-minting the same
