@@ -214,6 +214,23 @@ const SURFACES = [
   // The Dashboard card's "Review alerts" target, and a library_reconciled alert's.
   { name: "alerts-rig", path: "/alerts?rig=rig-fra", ready: "h1, main" },
   { name: "devices-missing", path: "/devices?rig=rig-fra&show=missing", ready: "h1, main" },
+  // The missing panel's leftovers and folder filter are in-page state, not URLs:
+  // `clicks` opens them before the capture. tools/seedack stages leftovers across
+  // several folders; a seed without them captures the plain panel.
+  {
+    name: "devices-missing-leftovers",
+    path: "/devices?rig=rig-fra&show=missing",
+    ready: ".missing-section",
+    clicks: ["details.missing-leftovers summary"],
+    scrollTo: "details.missing-leftovers",
+  },
+  {
+    name: "devices-missing-filtered",
+    path: "/devices?rig=rig-fra&show=missing",
+    ready: ".missing-section",
+    clicks: [".missing-section .missing-folder__name"],
+    scrollTo: ".missing-section",
+  },
   // The backlog alert's link: History narrowed to one rig's never-deletable
   // frames (the held frame tools/seeddemo stages per rig).
   { name: "history-never-deletable", path: "/history?rig=rig-fra&view=never_deletable", ready: "h1, main" },
@@ -485,6 +502,19 @@ async function main() {
             timeout: NAV_TIMEOUT,
           });
           await settle(page, surface.ready);
+          for (const sel of surface.clicks ?? []) {
+            const target = page.locator(sel);
+            if (await target.count()) {
+              await target.first().click();
+              await page.waitForTimeout(SETTLE_MS * 2);
+            } else {
+              console.log(`skip click ${sel} on ${device.name}-${surface.name} (absent)`);
+            }
+          }
+          if (surface.scrollTo) {
+            const target = page.locator(surface.scrollTo);
+            if (await target.count()) await target.first().scrollIntoViewIfNeeded();
+          }
           const base = join(OUT, `${device.name}-${surface.name}`);
           await page.screenshot({ path: `${base}-full.png`, fullPage: true });
           await page.screenshot({ path: `${base}-viewport.png`, fullPage: false });
