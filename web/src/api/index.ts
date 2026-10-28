@@ -15,6 +15,8 @@ export {
   type AckAlready,
   type AckGroupSkipped,
   type AckGroupChallenge,
+  type ForgetChallenge,
+  type ForgetScope,
 } from "./client";
 export { previewRetarget, applyRetarget } from "./retarget";
 export { previewRefile, applyRefile } from "./refile";

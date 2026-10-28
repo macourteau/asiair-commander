@@ -42,6 +42,7 @@ import type {
   LibraryStatus,
   LogPull,
   MissingFramesPage,
+  MissingSection,
   PreviewSize,
   PreviewRequest,
   PreviewResponse,
@@ -115,6 +116,8 @@ export interface AckAlready {
 
 /** Rows under the directory that don't qualify, so a mint's `count` can be explained. */
 export interface AckGroupSkipped {
+  /** Leftovers: already removed from the device (design library-reconciliation §13.3). */
+  gone: number;
   restore_pending: number;
   not_verified: number;
   already: number;
@@ -128,6 +131,23 @@ export interface AckGroupChallenge {
   count: number;
   dir_gone: boolean;
   skipped: AckGroupSkipped;
+}
+
+/** The server's description of what a bulk Forget would retire (challenge response,
+ * design library-reconciliation §13.4). `skipped.restore_pending` explains the gap
+ * from the folder or section count shown on the button. */
+export interface ForgetChallenge {
+  token: string;
+  expires_at: number;
+  count: number;
+  skipped: { restore_pending: number };
+}
+
+/** A bulk Forget's scope: no `dir` is the whole leftover section, no
+ * `older_than_days` any age. */
+export interface ForgetScope {
+  dir?: string;
+  older_than_days?: number;
 }
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -450,6 +470,40 @@ export const api = {
       `${rigPath(id)}/missing-groups/acknowledge`,
       { method: "POST", body: { dir, token } },
     ),
+  /**
+   * Forget one leftover row (design library-reconciliation §13.4): its mark and
+   * filed path are cleared so it leaves the panel; no file is touched. `undefined`
+   * on success (204); `{code: "FORGET_QUEUED"}` on 202 (busy, may already have
+   * applied — a SUCCESS value). Errors (ApiError.code): FORGET_NOT_LEFTOVER,
+   * FORGET_RESTORE_PENDING (409).
+   */
+  forgetFrame: (id: string, frameId: number) =>
+    request<{ code?: string } | undefined>(`${rigPath(id)}/frames/${frameId}/forget`, {
+      method: "POST",
+    }),
+  /**
+   * Mint a confirmation for forgetting the leftovers in `scope`. The token binds
+   * the forgettable ids found now, so rows that turn up before the confirm are not
+   * covered. Throws ApiError FORGET_NOTHING_TO_DO (409) with a server-built message
+   * when there are none.
+   */
+  forgetLeftoversChallenge: (id: string, scope: ForgetScope) =>
+    request<ForgetChallenge>(`${rigPath(id)}/missing-leftovers/forget`, {
+      method: "POST",
+      body: scope,
+    }),
+  /**
+   * Confirm a bulk Forget with the token minted for the same `scope`.
+   * `{forgotten: n}` on success (200), the rows actually changed;
+   * `{code: "FORGET_QUEUED"}` on 202 (busy, may already have applied — a SUCCESS
+   * value, and the token stays spendable). FORGET_CONFIRMATION_INVALID (403) on a
+   * missing, wrong or expired token.
+   */
+  forgetLeftoversConfirm: (id: string, scope: ForgetScope, token: string) =>
+    request<{ forgotten?: number; code?: string } | undefined>(
+      `${rigPath(id)}/missing-leftovers/forget`,
+      { method: "POST", body: { ...scope, token } },
+    ),
 
   // ---- global (fleet-wide) controls ------------------------------------
   pauseAll: () => request<void>("/api/pause", { method: "POST" }),
@@ -503,13 +557,19 @@ export const api = {
     signal?: AbortSignal,
   ) => request<FramesPage>(`${rigPath(id)}/frames${qs(params)}`, { signal }),
   /**
-   * Frames whose filed NAS copy went missing out of band, paged and grouped by
-   * directory. `missing=true` is exclusive of state/filter (the backend 400s if
-   * combined), so this is its own method rather than a listFrames flag.
+   * Frames whose filed NAS copy went missing out of band, one section at a time,
+   * paged and grouped by directory. `dir` (byte-exact) and `q` (case-insensitive
+   * substring of the filed path) narrow the table, never the folder stack.
+   * `missing=true` is exclusive of state/filter (the backend 400s if combined),
+   * so this is its own method rather than a listFrames flag.
    */
-  missingFrames: (id: string, page?: number, signal?: AbortSignal) =>
+  missingFrames: (
+    id: string,
+    params: { section: MissingSection; page?: number; dir?: string; q?: string },
+    signal?: AbortSignal,
+  ) =>
     request<MissingFramesPage>(
-      `${rigPath(id)}/frames${qs({ missing: true, page })}`,
+      `${rigPath(id)}/frames${qs({ missing: true, ...params })}`,
       { signal },
     ),
   /**

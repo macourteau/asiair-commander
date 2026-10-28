@@ -344,8 +344,15 @@ export interface LibraryStatus {
 /** One directory's missing-frame tally in the missing-frames envelope (model.MissingGroup). */
 export interface MissingGroup {
   dir: string;
+  /** The folder's rows in the section, ignoring the table's `dir` and `q`. */
   count: number;
+  /** How many of them a group-acknowledge challenge would bind (design
+   * library-reconciliation §13.2), so the button and the dialog agree. */
+  ackable: number;
 }
+
+/** The missing panel's two sections (design library-reconciliation §13.1). */
+export type MissingSection = "actionable" | "leftover";
 
 /**
  * Process constants announced once per SSE connection (the `server_info` event),
@@ -743,9 +750,13 @@ export interface FramesPage {
 /**
  * GET /api/rigs/{id}/frames?missing=true — the same paged envelope plus per-directory
  * missing tallies. `missing=true` cannot be combined with a state or filter (400).
+ * `total` counts the section's rows after `dir` and `q`; `groups` describes the
+ * whole section and `totals` both sections, unfiltered.
  */
 export interface MissingFramesPage extends FramesPage {
+  section: MissingSection;
   groups: MissingGroup[];
+  totals: { actionable: number; leftover: number };
 }
 
 /** GET /api/rigs/{id}/summary — the header-derived morning summary (shape TBD server-side). */

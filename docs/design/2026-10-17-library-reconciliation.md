@@ -1755,9 +1755,9 @@ power-off verdict's missing check (§4.7).
 
 ### 13.3 The panel
 
-- **Actionable section first**, headed with its count, then a search box, the folder stack and
-  the paged table. A folder line is a button that sets `dir`; the active folder shows as a
-  removable chip. **Acknowledge all N** renders only where `ackable > 0`, names `ackable`, and
+- **Actionable section first**, headed "Still on the device (N)", then a search box, the
+  folder stack and the paged table. A folder line is a button that sets `dir`; the active
+  folder shows as a removable chip. **Acknowledge all N** renders only where `ackable > 0`, names `ackable`, and
   never renders on a `keep_originals` rig.
 - **"Already gone from the device (M)"**, a disclosure that starts collapsed. Its body opens with
   one sentence: these frames were removed from both the device and the NAS, nothing is waiting on
