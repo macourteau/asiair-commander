@@ -10,7 +10,7 @@ require (
 	github.com/macourteau/smb1client v1.1.5
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.72.1
+	github.com/prometheus/common v0.73.0
 	github.com/tailscale/tailcat v0.7.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
@@ -50,6 +50,7 @@ require (
 	github.com/google/go-licenses/v2 v2.0.1 // indirect
 	github.com/google/licenseclassifier/v2 v2.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.2 // indirect
@@ -64,6 +65,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/otiai10/copy v1.10.0 // indirect
+	github.com/pandatix/go-abnf v0.5.1 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/sftp v1.13.11 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
