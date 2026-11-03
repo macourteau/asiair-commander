@@ -81,8 +81,8 @@ func TestRetarget_DeviceOriginalUntouched(t *testing.T) {
 		t.Fatalf("setup: device hash %q != recorded sha256 %q", beforeHash, f.SHA256)
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
-	if err != nil || res.Status != "retargeted" {
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
+	if err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 
@@ -98,16 +98,16 @@ func TestRetarget_DeviceOriginalUntouched(t *testing.T) {
 	// The NAS archive WAS edited — proof this is a real retarget, not a silent no-op
 	// that would make the device-untouched assertion vacuous.
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 == "" || got.RetargetSHA256 == f.SHA256 {
-		t.Fatalf("retarget did not edit the NAS archive (retarget_sha256=%q); nothing was proven", got.RetargetSHA256)
+	if got.EditSHA256 == "" || got.EditSHA256 == f.SHA256 {
+		t.Fatalf("retarget did not edit the NAS archive (edit_sha256=%q); nothing was proven", got.EditSHA256)
 	}
 }
 
 // TestRetarget_RefusesCorruptingWriter (INV-4, retarget level) substitutes, via the
 // injectable rewriter seam, a writer that corrupts a data-unit byte and reports the
-// differing complement digest an honest writer would. retargetFrame must REFUSE at
+// differing data digest an honest writer would. editFrame must REFUSE at
 // the faithfulness assertion: a failed result, no edited archive filed, no
-// retarget_sha256 set, and the old file untouched — proving a buggy writer can never
+// edit_sha256 set, and the old file untouched — proving a buggy writer can never
 // authorize deleting the correct device original.
 func TestRetarget_RefusesCorruptingWriter(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -116,41 +116,25 @@ func TestRetarget_RefusesCorruptingWriter(t *testing.T) {
 	f := fileLight(t, h, src)
 	oldDest := f.DestPath
 
-	h.w.rewriter = func(srcPath, dst, newTarget string) (header.RewriteResult, error) {
-		// Produce a well-formed edit first (so size and re-classification would pass),
-		// then corrupt one data-unit byte outside the OBJECT card.
-		rr, err := header.RewriteObject(srcPath, dst, newTarget)
-		if err != nil {
-			return rr, err
-		}
-		b, rerr := os.ReadFile(dst)
-		if rerr != nil {
-			return rr, rerr
-		}
-		b[len(b)-1] ^= 0xFF // the final byte lives in the data unit, never the header
-		if werr := os.WriteFile(dst, b, 0o644); werr != nil {
-			return rr, werr
-		}
-		// An honest complement digest over the corrupted output differs from the input's;
-		// report that so the load-bearing complement check trips (INV-4).
-		rr.ComplementOut[0] ^= 0xFF
-		return rr, nil
-	}
+	// A well-formed edit first (so size and re-classification would pass), then one
+	// data-unit byte corrupted outside the OBJECT card, reported with the data
+	// digest an honest writer would compute over the corrupted output (INV-4).
+	h.w.rewriter = corruptingWriter(t, flipLastByte, func(er *header.EditResult) { er.DataOut[0] ^= 0xFF })
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
 	if res.Status != "failed" {
 		t.Fatalf("status=%q, want failed on a corrupting writer (INV-4)", res.Status)
 	}
-	if !strings.Contains(res.Reason, "complement") {
-		t.Fatalf("reason=%q, want the complement-digest refusal", res.Reason)
+	if !strings.Contains(res.Reason, "data digests disagree") {
+		t.Fatalf("reason=%q, want the writer's data-digest refusal", res.Reason)
 	}
 
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 != "" {
-		t.Fatalf("a refused corrupting edit must never set retarget_sha256; got %q", got.RetargetSHA256)
+	if got.EditSHA256 != "" {
+		t.Fatalf("a refused corrupting edit must never set edit_sha256; got %q", got.EditSHA256)
 	}
 	if got.Target != "C-2025 A6" || got.DestPath != oldDest {
 		t.Fatalf("refusal must not move/relabel the frame: target=%q dest=%q", got.Target, got.DestPath)
@@ -195,9 +179,9 @@ func TestRetarget_CrashWindows(t *testing.T) {
 		// process dies before recordFiled commits the row.
 		h.w.crashAfterRename = func(dest string) bool { return strings.Contains(dest, "M31") }
 
-		res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+		res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 		if err != nil {
-			t.Fatalf("serviceRetarget: %v", err)
+			t.Fatalf("serviceEdit: %v", err)
 		}
 		if res.Status != "failed" {
 			t.Fatalf("status=%q, want failed (the commit never ran)", res.Status)
@@ -207,9 +191,9 @@ func TestRetarget_CrashWindows(t *testing.T) {
 		// design routing-and-filing §9.3 table row 2: OLD + NEW both exist; DB row at
 		// OLD path, overlay NULL.
 		got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-		if got.DestPath != oldDest || got.RetargetSHA256 != "" || got.Target != "C-2025 A6" {
+		if got.DestPath != oldDest || got.EditSHA256 != "" || got.Target != "C-2025 A6" {
 			t.Fatalf("crash-before-commit must leave the row un-retargeted: dest=%q target=%q overlay=%q",
-				got.DestPath, got.Target, got.RetargetSHA256)
+				got.DestPath, got.Target, got.EditSHA256)
 		}
 		if _, err := os.Stat(oldDest); err != nil {
 			t.Fatalf("OLD archive must remain intact: %v", err)
@@ -257,21 +241,21 @@ func TestRetarget_CrashWindows(t *testing.T) {
 			return nil
 		}
 
-		res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+		res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 		if err != nil {
-			t.Fatalf("serviceRetarget: %v", err)
+			t.Fatalf("serviceEdit: %v", err)
 		}
-		if res.Status != "retargeted" {
-			t.Fatalf("status=%q reason=%q, want retargeted (the commit landed)", res.Status, res.Reason)
+		if res.Status != "edited" {
+			t.Fatalf("status=%q reason=%q, want edited (the commit landed)", res.Status, res.Reason)
 		}
 		h.lfs.RemoveErr = nil
 
 		// design routing-and-filing §9.3 table row 3: OLD orphan + NEW; DB row at NEW
 		// path, overlay set.
 		got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-		if got.Target != "M31" || got.RetargetSHA256 == "" || !strings.Contains(got.DestPath, "M31") {
+		if got.Target != "M31" || got.EditSHA256 == "" || !strings.Contains(got.DestPath, "M31") {
 			t.Fatalf("crash-before-old-removal must leave the row retargeted at NEW: target=%q dest=%q overlay=%q",
-				got.Target, got.DestPath, got.RetargetSHA256)
+				got.Target, got.DestPath, got.EditSHA256)
 		}
 		if got.DestPath == oldDest {
 			t.Fatalf("the row must point at the NEW path")
@@ -279,11 +263,11 @@ func TestRetarget_CrashWindows(t *testing.T) {
 		if _, err := os.Stat(oldDest); err != nil {
 			t.Fatalf("OLD file must linger as an orphan: %v", err)
 		}
-		if hd := hashOnDisk(t, got.DestPath); hd != got.RetargetSHA256 {
-			t.Fatalf("NEW archive must verify against retarget_sha256: %q != %q", hd, got.RetargetSHA256)
+		if hd := hashOnDisk(t, got.DestPath); hd != got.EditSHA256 {
+			t.Fatalf("NEW archive must verify against edit_sha256: %q != %q", hd, got.EditSHA256)
 		}
 
-		// The delete pass verifies device == sha256 and NEW == retarget_sha256, deleting
+		// The delete pass verifies device == sha256 and NEW == edit_sha256, deleting
 		// the device original against the proven NEW archive — no false premise.
 		h.nowVal = h.nowVal.Add(2 * time.Hour)
 		h.w.deleteAllForTest(ctx, h.cfg, h.profile, h.dev, "10.0.0.1")
@@ -295,8 +279,8 @@ func TestRetarget_CrashWindows(t *testing.T) {
 		if after.State != model.StateDeleted {
 			t.Fatalf("state=%s, want deleted", after.State)
 		}
-		if hd := hashOnDisk(t, after.DestPath); hd != after.RetargetSHA256 {
-			t.Fatalf("no data loss: the NEW archive the row points at must survive and verify; %q != %q", hd, after.RetargetSHA256)
+		if hd := hashOnDisk(t, after.DestPath); hd != after.EditSHA256 {
+			t.Fatalf("no data loss: the NEW archive the row points at must survive and verify; %q != %q", hd, after.EditSHA256)
 		}
 		if _, err := os.Stat(oldDest); err != nil {
 			t.Fatalf("the OLD orphan is cosmetic and should still be present post-delete: %v", err)
@@ -305,7 +289,7 @@ func TestRetarget_CrashWindows(t *testing.T) {
 }
 
 // TestDelete_RetargetedVanishedSource (INV-5) proves handleVanishedSource compares
-// the present NAS copy against archiveHash(f) (= retarget_sha256): a retargeted
+// the present NAS copy against archiveHash(f) (= edit_sha256): a retargeted
 // frame whose device source has vanished but whose healthy archive is present is a
 // benign source-vanish, marked deleted — NOT a false frame_lost critical (which a
 // sha256 comparison against the edited archive would wrongly raise).
@@ -315,11 +299,11 @@ func TestDelete_RetargetedVanishedSource(t *testing.T) {
 	confirmDeleteIdentity(h)
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 == "" {
+	if got.EditSHA256 == "" {
 		t.Fatalf("setup: expected a retargeted overlay")
 	}
 
@@ -335,15 +319,15 @@ func TestDelete_RetargetedVanishedSource(t *testing.T) {
 	if after.State != model.StateDeleted {
 		t.Fatalf("state=%s, want deleted (benign source-vanish)", after.State)
 	}
-	if hd := hashOnDisk(t, after.DestPath); hd != after.RetargetSHA256 {
-		t.Fatalf("the retargeted archive must remain intact: %q != %q", hd, after.RetargetSHA256)
+	if hd := hashOnDisk(t, after.DestPath); hd != after.EditSHA256 {
+		t.Fatalf("the retargeted archive must remain intact: %q != %q", hd, after.EditSHA256)
 	}
 }
 
 // TestDiffer_RetargetedNoFalseLost (INV-5) exercises the differ branch (decide.go:129)
 // on a retargeted verified frame whose archive is intact: the device reused the source
 // path with genuinely-new content (a size change). resolveDiffer must read the archive
-// via archiveHash(row) (= retarget_sha256), see a benign overwrite, and pull — never
+// via archiveHash(row) (= edit_sha256), see a benign overwrite, and pull — never
 // raise a false CRITICAL frame_lost (which a sha256 comparison against the edited
 // archive would).
 func TestDiffer_RetargetedNoFalseLost(t *testing.T) {
@@ -351,7 +335,7 @@ func TestDiffer_RetargetedNoFalseLost(t *testing.T) {
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)

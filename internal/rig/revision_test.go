@@ -377,7 +377,7 @@ func TestZeroLengthDataUnitIsNeverAnIdentity(t *testing.T) {
 		h := newHarness(t, emmc, header.New())
 		ctx := context.Background()
 		f := pullFile(t, h, src, first, 10*time.Minute)
-		if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+		if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 			t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 		}
 
@@ -387,15 +387,15 @@ func TestZeroLengthDataUnitIsNeverAnIdentity(t *testing.T) {
 		// Re-applied to a file it does not describe, the rewrite passes its own
 		// faithfulness check and then fails the at-rest comparison, which classifyAndFile
 		// turns into a deferral — the frame is never filed and is re-pulled every cycle.
-		if h.logContains("re-apply retarget failed; deferring file") {
+		if h.logContains("re-apply of header edits failed; deferring file") {
 			t.Fatal("the overlay must not be re-applied to a frame that only shares an empty data unit")
 		}
 		after := mustGetFrame(t, h, f.ID)
 		if after.SHA256 != sha256hex(second) {
 			t.Fatalf("the second frame must be filed as the new content it is, got sha=%q", after.SHA256)
 		}
-		if after.RetargetSHA256 != "" {
-			t.Fatalf("genuinely new content resets the overlay, got %q", after.RetargetSHA256)
+		if after.EditSHA256 != "" {
+			t.Fatalf("genuinely new content resets the overlay, got %q", after.EditSHA256)
 		}
 	})
 }
@@ -403,8 +403,8 @@ func TestZeroLengthDataUnitIsNeverAnIdentity(t *testing.T) {
 // retargetTo re-labels one filed frame and returns the row the operation left.
 func retargetTo(t *testing.T, h *harness, id int64, target string) model.Frame {
 	t.Helper()
-	res, err := h.w.serviceRetarget(context.Background(), id, target)
-	if err != nil || res.Status != "retargeted" {
+	res, err := h.w.serviceEdit(context.Background(), id, "OBJECT", target)
+	if err != nil || res.Status != "edited" {
 		t.Fatalf("retarget %d to %q: status=%q reason=%q err=%v", id, target, res.Status, res.Reason, err)
 	}
 	return mustGetFrame(t, h, id)
@@ -444,16 +444,16 @@ func TestRetargetedFrameSurvivesARevision(t *testing.T) {
 	if got.DestPath != dest {
 		t.Fatalf("the frame must stay in the folder it was re-labelled into: %q, want %q", got.DestPath, dest)
 	}
-	if got.Target != relabelled.Target || got.RetargetFrom != relabelled.RetargetFrom {
-		t.Fatalf("the re-label must survive: target=%q from=%q", got.Target, got.RetargetFrom)
+	if got.Target != relabelled.Target || objectFrom(got.HeaderEdits) != objectFrom(relabelled.HeaderEdits) {
+		t.Fatalf("the re-label must survive: target=%q from=%q", got.Target, objectFrom(got.HeaderEdits))
 	}
 	if names := dirEntries(t, filepath.Dir(dest)); len(names) != 1 {
 		t.Fatalf("the revision is filed in place, not beside itself: %v", names)
 	}
 	onDisk := hashOnDisk(t, dest)
-	if got.ArchiveSHA256 != onDisk || got.RetargetSHA256 != onDisk {
+	if got.ArchiveSHA256 != onDisk || got.EditSHA256 != onDisk {
 		t.Fatalf("both the archive anchor and the audit record must describe the file: archive=%q overlay=%q disk=%q",
-			got.ArchiveSHA256, got.RetargetSHA256, onDisk)
+			got.ArchiveSHA256, got.EditSHA256, onDisk)
 	}
 	if got.ArchiveSize != int64(len(revised)) {
 		t.Fatalf("archive_size = %d, want the edited revision's %d", got.ArchiveSize, len(revised))
@@ -476,7 +476,7 @@ func TestRetargetedFrameSurvivesARevision(t *testing.T) {
 //
 // The supersede must refuse there. Left to proceed it is consequence 2 of the
 // design's Problem section, reintroduced and then permanently undetectable:
-// archive_sha256, retarget_sha256 and the on-disk hash would all agree, so every
+// archive_sha256, edit_sha256 and the on-disk hash would all agree, so every
 // later VerifyRead, three-way check and sameArchiveAt passes while the row's target
 // and the file's OBJECT disagree forever.
 func TestRetargetedFrameWithNoRecordedIdentityIsNotSuperseded(t *testing.T) {
@@ -499,11 +499,11 @@ func TestRetargetedFrameWithNoRecordedIdentityIsNotSuperseded(t *testing.T) {
 	if obj := objectOf(t, h, dest); obj != "M31" {
 		t.Fatalf("the re-labelled archive copy's OBJECT card reads %q, want the edit it was left with", obj)
 	}
-	if got := hashOnDisk(t, dest); got != relabelled.RetargetSHA256 {
-		t.Fatalf("a refused supersede leaves the archive copy untouched: %q, want %q", got, relabelled.RetargetSHA256)
+	if got := hashOnDisk(t, dest); got != relabelled.EditSHA256 {
+		t.Fatalf("a refused supersede leaves the archive copy untouched: %q, want %q", got, relabelled.EditSHA256)
 	}
 	got := mustGetFrame(t, h, f.ID)
-	if got.RetargetSHA256 == sha256hex(revised) {
+	if got.EditSHA256 == sha256hex(revised) {
 		t.Fatal("the audit record must never describe bytes carrying the device's own OBJECT card")
 	}
 	// The ordinary path for content the frame cannot prove itself the revision of:
@@ -513,8 +513,8 @@ func TestRetargetedFrameWithNoRecordedIdentityIsNotSuperseded(t *testing.T) {
 	if got.DestPath == dest {
 		t.Fatalf("a refused supersede must not file over the re-labelled copy: %q", got.DestPath)
 	}
-	if got.RetargetSHA256 != "" {
-		t.Fatalf("genuinely-new content resets the overlay as it does for any frame, got %q", got.RetargetSHA256)
+	if got.EditSHA256 != "" {
+		t.Fatalf("genuinely-new content resets the overlay as it does for any frame, got %q", got.EditSHA256)
 	}
 }
 
@@ -555,9 +555,9 @@ func TestBackfilledRetargetedFrameThenSupersedes(t *testing.T) {
 		t.Fatalf("the archive copy's OBJECT card reads %q, want the re-label", obj)
 	}
 	onDisk := hashOnDisk(t, dest)
-	if got.ArchiveSHA256 != onDisk || got.RetargetSHA256 != onDisk {
+	if got.ArchiveSHA256 != onDisk || got.EditSHA256 != onDisk {
 		t.Fatalf("both the archive anchor and the audit record must describe the file: archive=%q overlay=%q disk=%q",
-			got.ArchiveSHA256, got.RetargetSHA256, onDisk)
+			got.ArchiveSHA256, got.EditSHA256, onDisk)
 	}
 	if got.SHA256 != sha256hex(revised) {
 		t.Fatalf("the device anchor must describe the revised device copy, got %q", got.SHA256)
@@ -579,28 +579,15 @@ func TestRevisionReapplyRefusesACorruptingWriter(t *testing.T) {
 	relabelled := retargetTo(t, h, f.ID, "M31")
 	before := hashOnDisk(t, relabelled.DestPath)
 
-	h.w.rewriter = func(srcPath, dst, newTarget string) (header.RewriteResult, error) {
-		rr, err := header.RewriteObject(srcPath, dst, newTarget)
-		if err != nil {
-			return rr, err
-		}
-		b, rerr := os.ReadFile(dst)
-		if rerr != nil {
-			return rr, rerr
-		}
-		b[len(b)-1] ^= 0xFF // the final byte lives in the data unit, never the header
-		if werr := os.WriteFile(dst, b, 0o644); werr != nil {
-			return rr, werr
-		}
-		rr.ComplementOut[0] ^= 0xFF // an honest digest over the corrupted output
-		return rr, nil
-	}
+	// The final byte lives in the data unit, never the header; the writer reports
+	// the data digest an honest writer would over its corrupted output.
+	h.w.rewriter = corruptingWriter(t, flipLastByte, func(er *header.EditResult) { er.DataOut[0] ^= 0xFF })
 
 	h.nowVal = h.nowVal.Add(10 * time.Minute)
 	h.dev.AddFile(emmc, src, revised, h.nowVal.Add(-5*time.Minute))
 	h.cycle()
 
-	if !h.logContains("re-apply retarget failed; deferring file") {
+	if !h.logContains("re-apply of header edits failed; deferring file") {
 		t.Fatal("a corrupting edit must be refused before anything is filed")
 	}
 	if got := hashOnDisk(t, relabelled.DestPath); got != before {
@@ -680,7 +667,7 @@ func TestSupersedeAdvancesASharersOverlay(t *testing.T) {
 		t.Fatalf("setup: the two re-labelled rows must share one archive copy, got %q and %q",
 			sharerBefore.DestPath, revisedBefore.DestPath)
 	}
-	if sharerBefore.RetargetSHA256 == "" {
+	if sharerBefore.EditSHA256 == "" {
 		t.Fatal("setup: the sharer must carry an overlay for this test to cover the advance")
 	}
 
@@ -693,9 +680,9 @@ func TestSupersedeAdvancesASharersOverlay(t *testing.T) {
 		id   int64
 	}{{"the revised row", a.ID}, {"the sharer", b.ID}} {
 		got := mustGetFrame(t, h, tc.id)
-		if got.ArchiveSHA256 != onDisk || got.RetargetSHA256 != onDisk {
+		if got.ArchiveSHA256 != onDisk || got.EditSHA256 != onDisk {
 			t.Fatalf("%s: archive=%q overlay=%q must both describe the file (%q)",
-				tc.what, got.ArchiveSHA256, got.RetargetSHA256, onDisk)
+				tc.what, got.ArchiveSHA256, got.EditSHA256, onDisk)
 		}
 		if got.ArchiveSize != int64(len(revised)) {
 			t.Fatalf("%s: archive_size = %d, want %d", tc.what, got.ArchiveSize, len(revised))

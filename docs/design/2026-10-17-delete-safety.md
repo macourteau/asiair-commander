@@ -21,7 +21,8 @@ exposure. Read this page before changing any of the following:
 - library reconciliation: the library marker, the scan, `missing_seen_at`;
 - listing, enumeration or the SMB transport, including the remote tunnel;
 - any code that removes, renames over, or prunes a file on the NAS (dismiss, re-file,
-  retarget, supersede, restore) or on the device (sidecars, previews, the file browser);
+  header edit and retarget, supersede, restore) or on the device (sidecars, previews, the file
+  browser);
 - the frame-row anchors (`sha256`, `size`, `mtime`, `archive_sha256`, `archive_size`) or any
   comparison against them.
 
@@ -81,10 +82,12 @@ Because absence reads as a cull, any NAS-side move or removal must never leave a
 `dest_path` absent, unless that row is committed to its moved path or held out of the delete pass
 by an open intent. Otherwise reconciliation sees the old path missing and, once the mark
 settles, `handleAbsentNAS` deletes the device original on a false "culled" premise. This is why
-retarget files the edited copy to a different path before removing the old one, why re-file and
-supersede run under durable intents that defer the delete pass, and why rename-in-place is
-rejected for retarget ([routing-and-filing §9.3, §12](2026-10-17-routing-and-filing.md)). The retarget
-step-7 sharer gap in §8 is a known breach of this rule.
+a header edit that changes its route (every retarget) files the edited copy to a different path
+before removing the old one, why re-file, supersede and a header edit that keeps its route run
+under durable intents that defer the delete pass, and why rename-in-place is rejected for retarget
+([routing-and-filing §9.3, §12](2026-10-17-routing-and-filing.md),
+[header-edits §8](2026-11-02-header-edits.md)). The filing-path edit's step-7 sharer gap in §8 is
+a known breach of this rule.
 
 ### 2.3 Nothing is concluded from an error
 
@@ -236,11 +239,11 @@ vanished-source branch with no alert. A culled one raises the doubly-vanished wa
 | Path | What it removes | Guard, in brief | Specified in |
 |---|---|---|---|
 | Dismiss purge | An `unclassified` frame's quarantine copy | Only for `unclassified`; only when no other live row of the rig shares the `dest_path`; the row is tombstoned so the device file is not re-pulled while unchanged | [frame-lifecycle §13](2026-10-17-frame-lifecycle.md) |
-| Retarget old path | The pre-edit archive file | Only after the edited file is filed to a different path by a never-replacing rename **and** a re-read of the row proves the overlay committed; the device original is never touched. Known gap: no check for another row sharing the old `dest_path` (§8) | [routing-and-filing §9.3, §9.8](2026-10-17-routing-and-filing.md) |
+| Header edit old path (filing path, every retarget) | The pre-edit archive file | Only after the edited file is filed to a different path by a never-replacing rename **and** a re-read of the row proves the overlay committed; the device original is never touched. Known gap: no check for another row sharing the old `dest_path` (§8) | [routing-and-filing §9.3, §9.8](2026-10-17-routing-and-filing.md), [header-edits §8](2026-11-02-header-edits.md) |
 | Re-file | Moves an archive file; prunes directories it emptied | A move by never-replacing rename under a durable intent, which keeps the frame out of the delete pass while open; every row sharing the `dest_path` moves in one transaction, and a cross-rig sharer refuses the move; pruning removes only empty directories below a configured root, never one holding the library marker | [routing-and-filing §8.6, §8.7, §8.9](2026-10-17-routing-and-filing.md) |
-| Supersede claim | The superseded archive copy (set aside), or the installed copy on rollback | Four steps (aside, claim, commit, unlink) under an intent written first, so the bytes always exist under some name; the aside copy is unlinked only after the commit; a cross-rig sharer refuses the swap; an open intent defers the delete pass on that path | [frame-lifecycle §11.9](2026-10-17-frame-lifecycle.md) |
+| Supersede claim (a device revision, or a header edit that keeps its route) | The superseded archive copy (set aside), or the installed copy on rollback | Four steps (aside, claim, commit, unlink) under an intent written first, so the bytes always exist under some name; the aside copy is unlinked only after the commit, which advances every sharer; a cross-rig sharer refuses the swap; an open intent defers the delete pass on that path and refuses a second edit over it | [frame-lifecycle §11.9](2026-10-17-frame-lifecycle.md), [header-edits §8](2026-11-02-header-edits.md) |
 | Truncated-copy restore | A present but short NAS copy, replaced by a fresh pull | Only on `ErrShortFile`, never on absence; the restore-in-progress mark is persisted before the `Remove`, so a crash leaves a standing restore request rather than an armed cull | [frame-lifecycle §9.5](2026-10-17-frame-lifecycle.md), [library-reconciliation §4.4](2026-10-17-library-reconciliation.md) |
-| Staging temps | Pull, restore and retarget temps in the staging root | Each temp is created under a unique name in the staging root, never in the light or cal tree, and removed by a `defer` on every exit path | [frame-lifecycle §5.3](2026-10-17-frame-lifecycle.md) |
+| Staging temps | Pull, restore and header-edit temps in the staging root | Each temp is created under a unique name in the staging root, never in the light or cal tree, and removed by a `defer` on every exit path | [frame-lifecycle §5.3](2026-10-17-frame-lifecycle.md) |
 | Preview cache | Rendered JPEG previews under the data directory | Derived data only, never an archive file; LRU eviction at the size cap; a digest's renders are evicted when dismiss purges its NAS copy; stray `.tmp` files are removed at startup | [features §1](2026-10-17-features.md) |
 
 Commander keeps other scratch outside the archive, such as the file browser's upload staging
@@ -254,9 +257,9 @@ it read. The column semantics are in [frame-lifecycle §11.1](2026-10-17-frame-l
 | Anchor | Columns | Describes | Compared against |
 |---|---|---|---|
 | Device anchor | `sha256`, `size`, `mtime` | The device copy as last proven. It advances when a supersede adopts the device's own revision of the frame (H13) | Bytes and `Stat` results read from the ASIAIR |
-| Archive anchor | `archive_sha256`, `archive_size` | What the file at `dest_path` must hash to, and the length every archive-side read uses | Bytes read from the NAS (`archiveHash` is a field read of `archive_sha256`) |
-| Exposure identity | `data_sha256` | The data unit, which survives the device's header-only revision | Used to recognise a revision. It never authorizes a delete |
-| Retarget overlay | `retarget_sha256`, `retarget_from` | An audit record of an `OBJECT` edit | Never compared by an archive-side check |
+| Archive anchor | `archive_sha256`, `archive_size` | What the file at `dest_path` must hash to, and the length every archive-side read uses. A header edit changes both: the hash always, and the length when an inserted card grows the header by a block, so `archive_size` can differ from `size` ([header-edits §7](2026-11-02-header-edits.md)) | Bytes read from the NAS (`archiveHash` is a field read of `archive_sha256`) |
+| Exposure identity | `data_sha256` | The data unit, which survives the device's header-only revision and an operator's header edit | Used to recognise a revision. It never authorizes a delete |
+| Edit overlay | `edit_sha256`, `header_edits` | An audit record of the header edits, a retarget being its `OBJECT` entry | Never compared by an archive-side check |
 
 The delete pass's checks, by branch:
 
@@ -429,6 +432,8 @@ the doc's name: "library-reconciliation I26", "invariant 4 in architecture §8.2
 | Cull-drain acceptance criteria | AC1, AC1b, AC2–AC9 | [library-reconciliation §11.6](2026-10-17-library-reconciliation.md) | — |
 | Night invariants | INV-N1–INV-N7 | [routing-and-filing §6.9](2026-10-17-routing-and-filing.md) | `test/COVERAGE.md` |
 | Retarget invariants | INV-1–INV-10 | [routing-and-filing §9.9](2026-10-17-routing-and-filing.md) | `test/COVERAGE.md` |
+| Header-edit invariants | HE-1–HE-12 | [header-edits §11](2026-11-02-header-edits.md) | — |
+| Header-edit acceptance criteria | 1–7 | [header-edits §12](2026-11-02-header-edits.md) | — |
 | Mosaic and re-file invariants | INV-M1–INV-M11 | [routing-and-filing §10](2026-10-17-routing-and-filing.md) | `test/COVERAGE.md` |
 | Mosaic and re-file acceptance criteria | AC1–AC40 | [routing-and-filing §11](2026-10-17-routing-and-filing.md) | — |
 | Remote invariants | 1–12 | [remote-sites §12](2026-10-17-remote-sites.md) | `test/COVERAGE.md` |
@@ -443,7 +448,9 @@ the doc's name: "library-reconciliation I26", "invariant 4 in architecture §8.2
 These are the delete-adjacent series a change to a delete path is most likely to touch:
 data-loss 1–28; library-reconciliation I4, I4a, I4b, I5 and I32–I37 (authorizing a culled
 delete); library-reconciliation I25–I31 (Acknowledge); INV-M2 (no delete against an archive
-mid-move); INV-5 and INV-6 (retarget hash sides and crash windows); delete-yield 1–11
+mid-move); INV-5 and INV-6 (retarget hash sides and crash windows); header-edits HE-1, HE-2,
+HE-6, HE-7 and HE-10 (device anchor, archive length, three-way check and in-place crash windows);
+delete-yield 1–11
 (frame-lifecycle §12.9); remote-sites §12 invariants 1–5, 11 and 12; device-file-browser §8.1
 invariants 1–5; A4 and D1–D4.
 
@@ -468,8 +475,8 @@ change that widens one of them needs the same deliberate decision.
 | A removable medium that mounts and lists but whose frame entries are corrupted away reads drained | No presence oracle can prevent it, because the medium really mounted and the walk really read it. The false-Safe shape of residue without a medium does not occur on real hardware: a zeroed stick exports exactly like an empty slot | [device-identity-and-media §7.3](2026-10-17-device-identity-and-media.md) |
 | First-bind trust on a host-bound rig: a wrong device answering at the configured address during the first probe binds durably | The window is small; re-adopt corrects it; the content hash backstops every delete | [device-identity-and-media §4](2026-10-17-device-identity-and-media.md) |
 | A spoofed `scan_air` reply on a hostile LAN | Outside the trusted-LAN threat model. The content hash is the guarantee regardless | [device-identity-and-media §5](2026-10-17-device-identity-and-media.md) |
-| Retarget step 7 removes the old archive path with no check for another row sharing that `dest_path`, such as the H12 USB/eMMC pair | The device original is never touched and the edited bytes exist at the retargeted path. The sharer row is left pointing at a removed file, so it reads as culled and can later drain its own device original against an archive it no longer tracks. This is a bookkeeping gap, not a loss of the exposure | [routing-and-filing §9.8](2026-10-17-routing-and-filing.md) |
-| A crash mid-transfer or mid-retarget leaves a staging temp, or an orphaned old-path archive, behind | There is no startup sweep of stale rig staging temps. Admission's disk reserve still accounts for the space, and no invariant depends on the cleanup | [routing-and-filing §9.8](2026-10-17-routing-and-filing.md), [frame-lifecycle §5.3](2026-10-17-frame-lifecycle.md) |
+| A header edit committed through the filing path (every retarget) removes the old archive path at step 7 with no check for another row sharing that `dest_path`, such as the H12 USB/eMMC pair | The device original is never touched and the edited bytes exist at the edited path; an edit committed in place advances every sharer and has no such gap. The sharer row is left pointing at a removed file, so it reads as culled and can later drain its own device original against an archive it no longer tracks. This is a bookkeeping gap, not a loss of the exposure | [routing-and-filing §9.8](2026-10-17-routing-and-filing.md) |
+| A crash mid-transfer or mid-edit leaves a staging temp, or an orphaned old-path archive, behind | There is no startup sweep of stale rig staging temps. Admission's disk reserve still accounts for the space, and no invariant depends on the cleanup | [routing-and-filing §9.8](2026-10-17-routing-and-filing.md), [frame-lifecycle §5.3](2026-10-17-frame-lifecycle.md) |
 | A delete whose reply is lost (more frequent over a remote link) reads as a vanished source | The next pass's `Stat` finds nothing and the NAS copy is re-proven, so no data is at risk. The reporting is wrong: a warn "could not delete source" alert, `source_vanished` in place of `device_deleted`, and for a culled frame a false doubly-vanished warning | [remote-sites §7](2026-10-17-remote-sites.md) |
 | The gap between the final re-`Stat` and `Delete` grows to a WAN round trip over a remote | The hash-to-re-stat window (tens of seconds) is already the larger exposure and is unchanged | [remote-sites §7](2026-10-17-remote-sites.md) |
 | A file browser delete can remove a file that has no archived copy | The operator confirmed the unarchived count, and the run refuses if that count grew. `failed` and `held` rows of deleted files stay in the store | [device-file-browser §9](2026-10-17-device-file-browser.md) |
@@ -511,7 +518,8 @@ Udisk media marker, or reconciliation gets this review before it merges:
 9. **Nothing is reused across a slice or session boundary**, nothing runs between a frame's hash
    and its `Delete`, and restore still runs before delete in every cycle (§2.5,
    [frame-lifecycle §12.9](2026-10-17-frame-lifecycle.md)).
-10. **A path that writes a shared archive file commits every sharer** of that `dest_path`, and
+10. **A path that writes a shared archive file commits every sharer** of that `dest_path` — the
+    supersede of a device revision, the in-place header edit and the restore among them — and
     refuses when a sharer is out of reach (§2.5).
 11. **Arming a deletion class re-stamps its standing marks** with a fresh settle window
     (library-reconciliation I11b, §2.5).

@@ -190,10 +190,10 @@ type Worker struct {
 
 	lfs localfs.LocalFS
 	hdr header.Reader
-	// rewriter rewrites a FITS OBJECT card (design routing-and-filing §9.1),
-	// injected so a test can substitute a deliberately-corrupting writer; defaults
-	// to header.RewriteObject.
-	rewriter func(src, dst, newTarget string) (header.RewriteResult, error)
+	// rewriter writes an edited copy of a FITS header (design header-edits §4),
+	// injected so a test can substitute a deliberately corrupting writer and prove
+	// the worker's own proof refuses it; defaults to header.EditCards.
+	rewriter func(src, dst string, edits []header.CardEdit) (header.EditResult, error)
 	// crashAfterRename, when non-nil, is consulted inside fileFrom immediately after a
 	// successful RenameNoReplace and before the DB commit. Returning true makes fileFrom
 	// abandon the filing there, modelling a process crash in that window (design
@@ -272,15 +272,17 @@ type Worker struct {
 	rescanReqs  chan struct{}
 	restoreReqs chan restoreReq
 	linkReqs    chan linkReq
-	// retargetReqs carries synchronous per-frame retarget requests onto the worker
-	// goroutine, serviced ONLY in the Run select (not drainCommands): retarget acquires
+	// editReqs carries synchronous per-frame header-edit requests onto the worker
+	// goroutine, serviced ONLY in the Run select (not drainCommands): an edit acquires
 	// an admission slot and does heavy NAS work, so servicing it inside deleteOne's
 	// drainCommands — which already holds a slot — would deadlock a single-slot config,
-	// the same reason LinkLibrary is excluded (design routing-and-filing §9.3).
-	retargetReqs chan retargetReq
+	// the same reason LinkLibrary is excluded (design routing-and-filing §9.6,
+	// header-edits §9.1). Running between cycles also means no pass holds a copy of a
+	// frame row across an edit of it.
+	editReqs chan editReq
 	// refileReqs carries a whole selected re-file GROUP onto the worker goroutine,
 	// serviced ONLY in the Run select. The reason is latency rather than the
-	// admission-slot deadlock that keeps retarget out of drainCommands — a re-file
+	// admission-slot deadlock that keeps an edit out of drainCommands — a re-file
 	// takes no slot — but a per-frame request would wait a full poll cycle each
 	// time, so a 500-frame migration would stretch across a night of imaging while
 	// frames piled up on the ASIAIR (design routing-and-filing §8.8).
@@ -493,7 +495,7 @@ func NewWorker(
 		syncTemp:            (*os.File).Sync,
 		lfs:                 lfs,
 		hdr:                 hdr,
-		rewriter:            header.RewriteObject,
+		rewriter:            header.EditCards,
 		store:               st,
 		hub:                 h,
 		notify:              ntf,
@@ -509,7 +511,7 @@ func NewWorker(
 		rescanReqs:          make(chan struct{}, 1),
 		restoreReqs:         make(chan restoreReq),
 		linkReqs:            make(chan linkReq),
-		retargetReqs:        make(chan retargetReq),
+		editReqs:            make(chan editReq),
 		refileReqs:          make(chan refileReq),
 		wakeReqs:            make(chan struct{}, 1),
 		remoteWakeReqs:      make(chan struct{}, 1),
@@ -668,18 +670,19 @@ type linkReq struct {
 	reply chan error
 }
 
-// retargetReq carries a synchronous per-frame retarget request onto the worker
-// goroutine (design routing-and-filing §9.3/§9.6). reply MUST be buffered (cap 1) so a
-// caller that abandons the wait on ctx cancellation never blocks the worker's send.
-type retargetReq struct {
-	frameID   int64
-	newTarget string
-	reply     chan retargetReply
+// editReq carries a synchronous per-frame header-edit request onto the worker
+// goroutine (design header-edits §9.1). reply MUST be buffered (cap 1) so a caller
+// that abandons the wait on ctx cancellation never blocks the worker's send.
+type editReq struct {
+	frameID int64
+	key     string
+	value   string
+	reply   chan editReply
 }
 
-// retargetReply carries the outcome of one retarget back to the caller.
-type retargetReply struct {
-	result model.RetargetResult
+// editReply carries the outcome of one edit back to the caller.
+type editReply struct {
+	result model.EditResult
 	err    error
 }
 
@@ -725,30 +728,31 @@ func (w *Worker) LinkLibrary(ctx context.Context, root string) error {
 	}
 }
 
-// RetargetFrame relabels one archived frame's OBJECT card and re-files it under the
-// corrected target, synchronously on the worker goroutine (design routing-and-filing
-// §9.3/§9.6). It never touches the device original; the reply is buffered cap-1 so an
-// abandoned wait cannot block the worker.
-func (w *Worker) RetargetFrame(ctx context.Context, frameID int64, newTarget string) (model.RetargetResult, error) {
-	req := retargetReq{frameID: frameID, newTarget: newTarget, reply: make(chan retargetReply, 1)}
+// EditFrame sets one allowlisted header card of one archived frame to value —
+// relabelling OBJECT re-files it under the corrected target; FILTER edits it in
+// place unless its template names the filter — synchronously on the worker
+// goroutine (design header-edits §8, §9.1). It never touches the device original;
+// the reply is buffered cap-1 so an abandoned wait cannot block the worker.
+func (w *Worker) EditFrame(ctx context.Context, frameID int64, key, value string) (model.EditResult, error) {
+	req := editReq{frameID: frameID, key: key, value: value, reply: make(chan editReply, 1)}
 	select {
-	case w.retargetReqs <- req:
+	case w.editReqs <- req:
 	case <-ctx.Done():
-		return model.RetargetResult{FrameID: frameID}, ctx.Err()
+		return model.EditResult{FrameID: frameID}, ctx.Err()
 	}
 	select {
 	case rep := <-req.reply:
 		return rep.result, rep.err
 	case <-ctx.Done():
-		return model.RetargetResult{FrameID: frameID}, ctx.Err()
+		return model.EditResult{FrameID: frameID}, ctx.Err()
 	}
 }
 
-// PreviewRetarget projects where the given frames' archives would move under newTarget.
-// It is read-only (no NAS/device I/O), so it runs directly rather than being serviced on
-// the worker goroutine (design routing-and-filing §9.6).
-func (w *Worker) PreviewRetarget(ctx context.Context, ids []int64, newTarget string) ([]model.RetargetPreview, error) {
-	return w.previewRetarget(ctx, ids, newTarget), nil
+// PreviewEdit projects what setting key to value would do to each frame's archive.
+// It is read-only (no NAS/device I/O), so it runs directly rather than being serviced
+// on the worker goroutine (design header-edits §9.1).
+func (w *Worker) PreviewEdit(ctx context.Context, ids []int64, key, value string) ([]model.EditPreview, error) {
+	return w.previewEdit(ctx, ids, key, value), nil
 }
 
 // RefileGroup moves one selected group's frames to where the current templates say
@@ -776,31 +780,32 @@ func (w *Worker) RefileGroup(ctx context.Context, wantDir string, frameIDs []int
 }
 
 // PreviewRefile projects the whole migration for this rig. It runs on the caller's
-// goroutine rather than the worker's, exactly as PreviewRetarget does: it is
+// goroutine rather than the worker's, exactly as PreviewEdit does: it is
 // read-only, and putting a whole-library diff into a select with no default would
 // block pulls and the poll ticker for its duration.
 func (w *Worker) PreviewRefile(ctx context.Context, scope string) (model.RefilePreview, error) {
 	return w.previewRefile(ctx, scope)
 }
 
-// serviceRetarget loads the frame and rig config on the worker goroutine and runs the
-// design routing-and-filing §9.3 retarget operation. A missing rig/frame yields an
-// in-band skipped/failed result rather than an error, so the streaming apply handler
-// reports it per frame.
-func (w *Worker) serviceRetarget(ctx context.Context, frameID int64, newTarget string) (model.RetargetResult, error) {
+// serviceEdit loads the frame and rig config on the worker goroutine and runs the
+// header edit (design header-edits §8). The row is read here, at the select point,
+// so the edit acts on the row as it stands rather than on a copy some pass took
+// earlier. A missing rig/frame yields an in-band skipped/failed result rather than
+// an error, so the streaming apply handler reports it per frame.
+func (w *Worker) serviceEdit(ctx context.Context, frameID int64, key, value string) (model.EditResult, error) {
 	cfg := w.cfg.Load()
 	profile := cfg.Rig(w.profileID)
 	if profile == nil {
-		return model.RetargetResult{FrameID: frameID, Status: "failed", Reason: "rig not managed"}, nil
+		return model.EditResult{FrameID: frameID, Status: editFailed, Reason: "rig not managed"}, nil
 	}
 	f, ok, err := w.store.GetFrameByID(ctx, frameID)
 	if err != nil {
-		return model.RetargetResult{FrameID: frameID, Status: "failed", Reason: "lookup: " + err.Error()}, err
+		return model.EditResult{FrameID: frameID, Status: editFailed, Reason: "lookup: " + err.Error()}, err
 	}
 	if !ok || f.RigID != w.profileID {
-		return model.RetargetResult{FrameID: frameID, Status: "skipped", Reason: "frame not found"}, nil
+		return model.EditResult{FrameID: frameID, Status: editSkipped, Reason: "frame not found"}, nil
 	}
-	return w.retargetFrame(ctx, cfg, profile, *f, newTarget)
+	return w.editFrame(ctx, cfg, profile, *f, key, value)
 }
 
 // RescanLibrary asks the worker to run a library scan on its next cycle. The
@@ -1165,9 +1170,9 @@ func (w *Worker) Run(ctx context.Context) {
 			req.reply <- restoreReply{n: n, err: err}
 		case req := <-w.linkReqs:
 			req.reply <- w.linkLibrary(ctx, req.root)
-		case req := <-w.retargetReqs:
-			res, err := w.serviceRetarget(ctx, req.frameID, req.newTarget)
-			req.reply <- retargetReply{result: res, err: err}
+		case req := <-w.editReqs:
+			res, err := w.serviceEdit(ctx, req.frameID, req.key, req.value)
+			req.reply <- editReply{result: res, err: err}
 		case req := <-w.refileReqs:
 			// The request's context, not the worker's: a cancelled or timed-out apply
 			// must stop the group between frames. The group runs to completion without

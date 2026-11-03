@@ -291,7 +291,7 @@ func NightFolder(cls model.Classification, rig model.RigProfile, opts Options) (
 // header is read, and two of its three consumers never read one.
 //
 // Those consumers are re-file's default scope, the Settings preview's LIGHT and
-// MOSAIC row predicates, and previewRetarget's NightApprox template arm; all
+// MOSAIC row predicates, and the OBJECT edit preview's NightApprox template arm; all
 // three need the answer route.Result cannot give, since it carries only the root
 // and the rendered directory. It exists so none of them re-derives
 // "detection && LIGHT && parses", and no routing or predicate decision anywhere

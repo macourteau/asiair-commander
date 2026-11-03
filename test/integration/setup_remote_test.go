@@ -54,10 +54,10 @@ func (setupSupervisor) ForgetFrame(string, int64) error { return nil }
 func (setupSupervisor) ForgetLeftovers(string, string, int, []int64) (int, error) {
 	return 0, nil
 }
-func (setupSupervisor) RetargetFrame(_ string, frameID int64, _ string) (model.RetargetResult, error) {
-	return model.RetargetResult{FrameID: frameID, Status: "retargeted"}, nil
+func (setupSupervisor) EditFrame(_ string, frameID int64, _, _ string) (model.EditResult, error) {
+	return model.EditResult{FrameID: frameID, Status: "edited"}, nil
 }
-func (setupSupervisor) PreviewRetarget(string, []int64, string) ([]model.RetargetPreview, error) {
+func (setupSupervisor) PreviewEdit(string, []int64, string, string) ([]model.EditPreview, error) {
 	return nil, nil
 }
 func (setupSupervisor) PreviewRefile(context.Context, string, string) (model.RefilePreview, error) {

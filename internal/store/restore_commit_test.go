@@ -22,7 +22,7 @@ func TestCommitRestoreAdvancesTheReadRowAndItsSharers(t *testing.T) {
 	read := seedSupersedeRow(t, s, "Autorun/a.fit", dest, model.Frame{
 		SHA256: "device-a-revised", DataSHA256: "the-exposure", Size: 102880, Mtime: 20,
 		ArchiveSHA256: "stale", ArchiveSize: 100,
-		RetargetSHA256: "overlay-before", RetargetFrom: "NGC 1",
+		EditSHA256: "overlay-before", HeaderEdits: objectEdits("M31", "NGC 1"),
 		State: model.StateHeld, PulledAt: 1000,
 	})
 	requested := seedSupersedeRow(t, s, "Autorun/b.fit", dest, model.Frame{
@@ -35,8 +35,8 @@ func TestCommitRestoreAdvancesTheReadRowAndItsSharers(t *testing.T) {
 		RigID: "rig-h13", DestPath: dest, FrameID: read.ID,
 		SHA256: "device-a-revised", Size: 102880, Mtime: 20,
 		ArchiveSHA256: "archive-restored", ArchiveSize: 102880,
-		RetargetSHA256: "archive-restored",
-		State:          model.StateVerified, PulledAt: 2000,
+		EditSHA256: "archive-restored",
+		State:      model.StateVerified, PulledAt: 2000,
 	})
 	if err != nil || !ok || sharers != 1 {
 		t.Fatalf("CommitRestore: read=%v sharers=%d err=%v", ok, sharers, err)
@@ -46,7 +46,7 @@ func TestCommitRestoreAdvancesTheReadRowAndItsSharers(t *testing.T) {
 	if got.ArchiveSHA256 != "archive-restored" || got.ArchiveSize != 102880 {
 		t.Fatalf("the read row's archive anchors must describe the restored file: %+v", got)
 	}
-	if got.RetargetSHA256 != "archive-restored" || got.RetargetFrom != "NGC 1" {
+	if got.EditSHA256 != "archive-restored" || objectFrom(got.HeaderEdits) != "NGC 1" {
 		t.Fatalf("the audit record follows the file it describes; what the frame was called does not: %+v", got)
 	}
 	if got.State != model.StateVerified || got.PulledAt != 2000 {
@@ -66,8 +66,8 @@ func TestCommitRestoreAdvancesTheReadRowAndItsSharers(t *testing.T) {
 	if other.PulledAt != 1001 || other.State != model.StateVerified {
 		t.Fatalf("the un-read row's own lifecycle is not this restore's to advance: pulled_at=%d state=%s", other.PulledAt, other.State)
 	}
-	if other.RetargetSHA256 != "" {
-		t.Fatalf("a row that was never retargeted must not gain an overlay, got %q", other.RetargetSHA256)
+	if other.EditSHA256 != "" {
+		t.Fatalf("a row that was never retargeted must not gain an overlay, got %q", other.EditSHA256)
 	}
 }
 

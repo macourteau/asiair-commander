@@ -100,7 +100,7 @@ func TestRestoreOfARevisedCulledFrameWritesTheRevisedBytes(t *testing.T) {
 
 // TestRestoreOfARevisedRetargetedFrameAdvancesTheOverlay (design frame-lifecycle
 // AC20, the overlay half) is the audit record following the file it describes: the
-// restore re-applies the OBJECT edit to the REVISED bytes, so retarget_sha256 has
+// restore re-applies the OBJECT edit to the REVISED bytes, so edit_sha256 has
 // to name what the archive copy now holds. Left at its pre-revision value it
 // describes bytes the file no longer holds, which is why an audit record never
 // serves as an archive-side fallback.
@@ -112,7 +112,7 @@ func TestRestoreOfARevisedRetargetedFrameAdvancesTheOverlay(t *testing.T) {
 
 	filed := pullFile(t, h, src, original, 10*time.Minute)
 	labelled := retargetTo(t, h, filed.ID, "M 42")
-	if labelled.RetargetSHA256 == "" {
+	if labelled.EditSHA256 == "" {
 		t.Fatal("setup: the frame must carry an overlay")
 	}
 	if err := os.Remove(labelled.DestPath); err != nil { // the operator culls the NAS copy
@@ -136,8 +136,8 @@ func TestRestoreOfARevisedRetargetedFrameAdvancesTheOverlay(t *testing.T) {
 	if got.ArchiveSHA256 != onDisk || got.ArchiveSize != int64(len(revised)) {
 		t.Fatalf("the archive anchors must describe the edited revision: sha=%q size=%d", got.ArchiveSHA256, got.ArchiveSize)
 	}
-	if got.RetargetSHA256 != onDisk {
-		t.Fatalf("retarget_sha256 = %q, want the bytes the file holds %q", got.RetargetSHA256, onDisk)
+	if got.EditSHA256 != onDisk {
+		t.Fatalf("edit_sha256 = %q, want the bytes the file holds %q", got.EditSHA256, onDisk)
 	}
 	if got.SHA256 != sha256hex(revised) || got.Size != int64(len(revised)) {
 		t.Fatalf("the device anchors describe the DEVICE copy: sha=%q size=%d", got.SHA256, got.Size)

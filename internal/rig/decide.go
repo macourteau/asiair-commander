@@ -170,7 +170,7 @@ func (w *Worker) resolveDiffer(ctx context.Context, row *model.Frame) bool {
 		if hash == archiveHash(*row) {
 			// The old copy is safely on the NAS; the source merely got overwritten. The
 			// archive-side compare uses archiveHash so a retargeted copy (whose bytes hash
-			// to retarget_sha256, not sha256) is not mistaken for a lost frame (design
+			// to edit_sha256, not sha256) is not mistaken for a lost frame (design
 			// routing-and-filing §9.5).
 			w.log.Info("rig: differ-branch old copy intact on NAS (benign overwrite)", "dest", row.DestPath)
 			return true

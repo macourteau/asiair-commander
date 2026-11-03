@@ -91,7 +91,7 @@ func TestEveryFilingWriterSetsTheArchiveAnchors(t *testing.T) {
 	t.Run("retarget", func(t *testing.T) {
 		h := newHarness(t, emmc, header.New())
 		f := fileLight(t, h, "Autorun/Light/C-2025 A6/Light_0001.fit")
-		if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+		if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 			t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 		}
 		// The edited bytes, not the device original's: the archive side follows the
@@ -138,7 +138,7 @@ func TestRetargetPreservesRecordedDataSHA256(t *testing.T) {
 	if err := h.store.UpsertFrame(ctx, got); err != nil {
 		t.Fatalf("record data_sha256: %v", err)
 	}
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 
@@ -162,7 +162,13 @@ func downgradeToSchema8(t *testing.T, path string) {
 		t.Fatalf("open raw db: %v", err)
 	}
 	defer raw.Close()
+	// migrate12's overlay columns are folded back first: a v8 row carries the
+	// retarget pair, with retarget_from the OBJECT entry's from.
 	const ddl = `
+ALTER TABLE frames RENAME COLUMN edit_sha256 TO retarget_sha256;
+ALTER TABLE frames ADD COLUMN retarget_from TEXT;
+UPDATE frames SET retarget_from = json_extract(header_edits, '$[0].from') WHERE header_edits IS NOT NULL;
+ALTER TABLE frames DROP COLUMN header_edits;
 ALTER TABLE frames DROP COLUMN data_sha256;
 ALTER TABLE frames DROP COLUMN archive_sha256;
 ALTER TABLE frames DROP COLUMN archive_size;
@@ -192,7 +198,7 @@ func TestDayZeroMigrationSeedsTheArchiveAnchors(t *testing.T) {
 	overSrc := "Autorun/Light/C-2025 A6/Light_0002.fit"
 	plain := fileLight(t, h, plainSrc)
 	over := fileLight(t, h, overSrc)
-	if res, err := h.w.serviceRetarget(ctx, over.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, over.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 
@@ -200,7 +206,7 @@ func TestDayZeroMigrationSeedsTheArchiveAnchors(t *testing.T) {
 	plainRow, _, _ := h.store.GetFrameByID(ctx, plain.ID)
 	overRow, _, _ := h.store.GetFrameByID(ctx, over.ID)
 	wantPlain, wantPlainSize := plainRow.SHA256, plainRow.Size
-	wantOver, wantOverSize := overRow.RetargetSHA256, overRow.Size
+	wantOver, wantOverSize := overRow.EditSHA256, overRow.Size
 	if wantOver == "" {
 		t.Fatal("the retargeted row must carry an overlay for this test to cover the overlay arm")
 	}
@@ -210,7 +216,7 @@ func TestDayZeroMigrationSeedsTheArchiveAnchors(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 	downgradeToSchema8(t, dbPath)
-	migrated, err := store.Open(dbPath) // runs migrate9 through migrate11
+	migrated, err := store.Open(dbPath) // runs migrate9 through migrate12
 	if err != nil {
 		t.Fatalf("re-open (migrate): %v", err)
 	}

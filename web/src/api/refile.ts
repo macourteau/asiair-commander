@@ -2,7 +2,7 @@
  * Re-file API — the Tools page's re-file endpoints (design
  * routing-and-filing §8.11). Both are POST and both go through the
  * write guard, so both carry CSRF; the fetch and NDJSON boilerplate is shared with
- * retarget.ts via stream.ts.
+ * headerEdit.ts via stream.ts.
  *
  *   POST /api/rigs/{id}/refile/preview  body {scope}              -> RefilePreview
  *   POST /api/rigs/{id}/refile/apply    body {to_dir, frame_ids}  -> streamed

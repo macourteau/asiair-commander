@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/macourteau/asiair-commander/internal/model"
@@ -102,7 +103,7 @@ func TestCommitSupersedeAdvancesTheRevisedRowAndItsSharers(t *testing.T) {
 // TestCommitSupersedeAdvancesOnlyAnExistingOverlay pins the overlay rule from both
 // sides. The audit record must keep matching what the archive file holds, so a row
 // carrying one has it advanced wherever that file is rewritten; a row carrying none
-// must not GAIN one, a non-empty retarget_sha256 being what "this frame was
+// must not GAIN one, a non-empty edit_sha256 being what "this frame was
 // retargeted" means.
 func TestCommitSupersedeAdvancesOnlyAnExistingOverlay(t *testing.T) {
 	ctx := context.Background()
@@ -116,28 +117,28 @@ func TestCommitSupersedeAdvancesOnlyAnExistingOverlay(t *testing.T) {
 	overlaid := seedSupersedeRow(t, s, "Autorun/overlaid.fit", dest, model.Frame{
 		SHA256: "device-overlaid", Size: 100, Mtime: 11,
 		ArchiveSHA256: "edited-old", ArchiveSize: 100, State: model.StateVerified,
-		RetargetSHA256: "edited-old", RetargetFrom: "C-2025 A6",
+		EditSHA256: "edited-old", HeaderEdits: objectEdits("M31", "C-2025 A6"),
 	})
 
 	if _, _, err := s.CommitSupersede(ctx, SupersedeIntent{
 		RigID: "rig-h13", DestPath: dest, AsidePath: dest + ".superseding-x", FrameID: plain.ID,
 		SHA256: "device-plain-revised", Size: 102880, Mtime: 20,
-		ArchiveSHA256: "edited-new", ArchiveSize: 102880, RetargetSHA256: "edited-new",
+		ArchiveSHA256: "edited-new", ArchiveSize: 102880, EditSHA256: "edited-new",
 		State: model.StateVerified, PulledAt: 2000,
 	}); err != nil {
 		t.Fatalf("CommitSupersede: %v", err)
 	}
 
-	if got, _, _ := s.GetFrameByID(ctx, plain.ID); got.RetargetSHA256 != "" || got.RetargetFrom != "" {
+	if got, _, _ := s.GetFrameByID(ctx, plain.ID); got.EditSHA256 != "" || objectFrom(got.HeaderEdits) != "" {
 		t.Fatalf("a row that was never retargeted must not gain an overlay: sha=%q from=%q",
-			got.RetargetSHA256, got.RetargetFrom)
+			got.EditSHA256, objectFrom(got.HeaderEdits))
 	}
 	got, _, _ := s.GetFrameByID(ctx, overlaid.ID)
-	if got.RetargetSHA256 != "edited-new" {
-		t.Fatalf("the audit record must follow the file it describes, got %q", got.RetargetSHA256)
+	if got.EditSHA256 != "edited-new" {
+		t.Fatalf("the audit record must follow the file it describes, got %q", got.EditSHA256)
 	}
-	if got.RetargetFrom != "C-2025 A6" {
-		t.Fatalf("what the frame was labelled before does not change when its bytes do, got %q", got.RetargetFrom)
+	if objectFrom(got.HeaderEdits) != "C-2025 A6" {
+		t.Fatalf("what the frame was labelled before does not change when its bytes do, got %q", objectFrom(got.HeaderEdits))
 	}
 
 	// An intent carrying no overlay value leaves every row's record alone, rather
@@ -150,8 +151,8 @@ func TestCommitSupersedeAdvancesOnlyAnExistingOverlay(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CommitSupersede (no overlay): %v", err)
 	}
-	if got, _, _ := s.GetFrameByID(ctx, overlaid.ID); got.RetargetSHA256 != "edited-new" {
-		t.Fatalf("an empty overlay value writes nothing, got %q", got.RetargetSHA256)
+	if got, _, _ := s.GetFrameByID(ctx, overlaid.ID); got.EditSHA256 != "edited-new" {
+		t.Fatalf("an empty overlay value writes nothing, got %q", got.EditSHA256)
 	}
 }
 
@@ -198,8 +199,9 @@ func TestSupersedeIntentRoundTripsEveryAnchor(t *testing.T) {
 	in := SupersedeIntent{
 		RigID: "rig-h13", DestPath: "/lib/M31/Light_0004.fit",
 		AsidePath: "/lib/M31/Light_0004.fit.superseding-abcdef", FrameID: 42,
+		Kind:   SupersedeRevision,
 		SHA256: "device-revised", Size: 102880, Mtime: 1_700_000_000,
-		ArchiveSHA256: "archive-revised", ArchiveSize: 102880, RetargetSHA256: "edited",
+		ArchiveSHA256: "archive-revised", ArchiveSize: 102880, EditSHA256: "edited",
 		State: model.StateVerified, PulledAt: 1_700_000_100, CreatedAt: 1_700_000_200,
 	}
 	if err := s.PutSupersedeIntent(ctx, in); err != nil {
@@ -209,7 +211,7 @@ func TestSupersedeIntentRoundTripsEveryAnchor(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListSupersedeIntents: n=%d err=%v", len(list), err)
 	}
-	if list[0] != in {
+	if !reflect.DeepEqual(list[0], in) {
 		t.Fatalf("intent round-trip lost an anchor:\n got %+v\nwant %+v", list[0], in)
 	}
 
@@ -229,7 +231,7 @@ func TestSupersedeIntentRoundTripsEveryAnchor(t *testing.T) {
 	if err := s.PutSupersedeIntent(ctx, in); err != nil {
 		t.Fatalf("PutSupersedeIntent (rewrite): %v", err)
 	}
-	if list, err = s.ListSupersedeIntents(ctx); err != nil || len(list) != 1 || list[0] != in {
+	if list, err = s.ListSupersedeIntents(ctx); err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], in) {
 		t.Fatalf("rewrite: n=%d err=%v got %+v", len(list), err, list)
 	}
 

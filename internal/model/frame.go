@@ -73,8 +73,8 @@ type Frame struct {
 	// ArchiveSHA256 and ArchiveSize describe the ARCHIVE copy: what the file at
 	// DestPath must hash to, and the length EVERY archive-side comparison against
 	// it uses — VerifyRead's argument among them, and equally the short-circuit
-	// sameArchiveAt makes before spending a read-back and the Stat compare inside
-	// assertRetargetEdit, neither of them a VerifyRead argument. They are one value
+	// sameArchiveAt makes before spending a read-back and the length check of an
+	// edit's proof, neither of them a VerifyRead argument. They are one value
 	// with SHA256/Size only while the archive copy is a byte-for-byte image of the
 	// device copy, which a device-side revision falsifies: on a row sharing its
 	// archive file with another row, Size stays put while ArchiveSize advances
@@ -92,22 +92,22 @@ type Frame struct {
 	// disagreement rather than per row lifetime (design frame-lifecycle §11.13).
 	DeleteDeferCount int `json:"delete_defer_count"`
 
-	// RetargetSHA256 and RetargetFrom are the retarget AUDIT record: that a
-	// re-label happened, and what the frame was labelled before it. "" (SQL NULL)
-	// = never retargeted. RetargetSHA256 is the content hash the edit produced, so
-	// it advances wherever the edited file is rewritten — an audit record that
-	// silently stops matching the file it describes is why this pair carries no
-	// archive-side fallback. The live archive-side expectation is
-	// ArchiveSHA256, never this pair: archive-side checks do NOT fall back to
+	// EditSHA256 and HeaderEdits are the edit overlay: that the archive copy is an
+	// edit of its device copy, and which header cards the edits changed. "" (SQL
+	// NULL) = never edited. EditSHA256 is the content hash the most recent edit or
+	// re-apply produced, so it advances wherever the edited file is rewritten — an
+	// audit record that silently stops matching the file it describes is why the
+	// overlay carries no archive-side fallback. The live archive-side expectation is
+	// ArchiveSHA256, never the overlay: archive-side checks do NOT fall back to
 	// SHA256, which is mutable (a supersede advances it) and would otherwise move
 	// the archive-side expectation of every frame carrying no overlay
-	// (design routing-and-filing §9.2, design frame-lifecycle §11.1).
-	RetargetSHA256 string `json:"retarget_sha256"`
-	// RetargetFrom is the original target string retained for UI/audit across
-	// repeated retargets; "" when the frame was never retargeted. The Target column
-	// holds the classified target after retargeting (design routing-and-filing
-	// §9.2).
-	RetargetFrom string `json:"retarget_from"`
+	// (design header-edits §5.1, design frame-lifecycle §11.1).
+	EditSHA256 string `json:"edit_sha256"`
+	// HeaderEdits is every edited card, in the order each key was first edited; nil
+	// (SQL NULL) when the frame was never edited. It is authoritative for what a
+	// re-apply writes, while Target and Filter hold the classified values of the
+	// edited header (design header-edits §5.1).
+	HeaderEdits HeaderEdits `json:"header_edits,omitempty"`
 
 	FrameType string  `json:"frame_type"`
 	Target    string  `json:"target"`
@@ -178,4 +178,4 @@ type Frame struct {
 // config schema): the two schemas evolve independently, so welding them to one
 // constant would force a store-only migration to spuriously bump the config
 // schema (and vice versa), breaking the other's load guard.
-const CurrentStoreSchemaVersion = 11
+const CurrentStoreSchemaVersion = 12

@@ -852,18 +852,22 @@ export interface RootsCheckResponse {
   results: RootCheckResult[];
 }
 
-// ---- retarget (Tools page, internal/model) --------------------------------
+// ---- header edit (Tools page, internal/model) -----------------------------
 
-/** Outcome of retargeting one frame (model.RetargetResult). */
-export type RetargetStatus = "retargeted" | "skipped" | "failed";
+/** The FITS keywords the Tools page can edit (header.EditableKeys, design
+ * header-edits §3); the server refuses any other key. */
+export type EditableKey = "OBJECT" | "FILTER";
+
+/** Outcome of editing one frame (model.EditResult). */
+export type EditStatus = "edited" | "skipped" | "failed";
 
 /**
- * One line of the streamed NDJSON body from POST /api/rigs/{id}/retarget/apply
- * (model.RetargetResult) — flushed as each frame completes.
+ * One line of the streamed NDJSON body from POST /api/rigs/{id}/edit/apply
+ * (model.EditResult) — flushed as each frame completes.
  */
-export interface RetargetResult {
+export interface EditResult {
   frame_id: number;
-  status: RetargetStatus;
+  status: EditStatus;
   /** Why the frame was skipped/failed; absent on success. */
   reason?: string;
   old_path?: string;
@@ -871,29 +875,39 @@ export interface RetargetResult {
 }
 
 /**
- * POST /api/rigs/{id}/retarget/preview response row (model.RetargetPreview).
+ * POST /api/rigs/{id}/edit/preview response row (model.EditPreview).
  * `new_path` is the index-0 canonical destination, night folder included; Apply
- * may still disambiguate the filename on a collision. `night_approx` flags an
- * ordinal that anything filed before Apply runs could still shift (the preview
- * resolves the night without ever mutating night_counters).
+ * may still disambiguate the filename on a collision. `in_place` marks an edit
+ * that rewrites the card where the file lies, leaving its path unchanged.
  */
-export interface RetargetPreview {
+export interface EditPreview {
   frame_id: number;
-  current_target: string;
+  /** The card's stored value; empty with `current_present: false` when the
+   * frame has no such card. */
+  current_value: string;
+  current_present: boolean;
   old_path: string;
   new_path: string;
-  night_approx: boolean;
-  /**
-   * Raw OBJECT spellings already filed in the destination night folder that
-   * differ from the target as it will be written; absent when there is none.
-   */
-  existing_spellings?: string[];
   eligible: boolean;
   /**
    * Why the frame is not eligible — or, on an eligible row, an informational
    * note such as a ledger read the preview could not make.
    */
   reason?: string;
+  in_place: boolean;
+  /**
+   * OBJECT only: the night ordinal is approximate, since anything filed before
+   * Apply runs could still shift it (the preview resolves the night without ever
+   * mutating night_counters).
+   */
+  night_approx?: boolean;
+  /**
+   * For OBJECT, the raw spellings already filed in the destination night folder
+   * that differ from the target as it will be written. For FILTER, the rig's
+   * filter spellings that equal the value case-insensitively but not exactly.
+   * Absent when there is none.
+   */
+  existing_spellings?: string[];
 }
 
 // ---- re-file (Tools page, internal/model/refile.go) -----------------------

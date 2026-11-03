@@ -6,9 +6,9 @@
  */
 import type { IconName } from "./icons";
 import type {
+  EditStatus,
   FrameState,
   RequestedState,
-  RetargetStatus,
   RigState,
   SafeToPowerOff,
   Severity,
@@ -312,11 +312,11 @@ export function missingWarningView(warning: string): StatusView {
   return { tone: "problem", icon: "missing", label: "Frames missing", help: warning };
 }
 
-/** One frame's outcome from a retarget apply run (Tools page, model.RetargetResult). */
-export function retargetResultView(status: RetargetStatus): StatusView {
+/** One frame's outcome from a header-edit apply run (Tools page, model.EditResult). */
+export function editResultView(status: EditStatus): StatusView {
   switch (status) {
-    case "retargeted":
-      return { tone: "safe", icon: "safe", label: "Retargeted" };
+    case "edited":
+      return { tone: "safe", icon: "safe", label: "Edited" };
     case "skipped":
       return { tone: "neutral", icon: "clock", label: "Skipped" };
     case "failed":

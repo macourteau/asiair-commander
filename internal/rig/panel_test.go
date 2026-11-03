@@ -21,8 +21,8 @@ func objectFixture(t *testing.T, target string) []byte {
 	src := filepath.Join(dir, "src.fit")
 	writeLocal(t, src, fixture(t, "asiair_light_2600mm_ha.fit"))
 	dst := filepath.Join(dir, "dst.fit")
-	if _, err := header.RewriteObject(src, dst, target); err != nil {
-		t.Fatalf("RewriteObject(%q): %v", target, err)
+	if _, err := header.EditCards(src, dst, []header.CardEdit{{Key: "OBJECT", Value: target}}); err != nil {
+		t.Fatalf("EditCards(OBJECT=%q): %v", target, err)
 	}
 	b, err := os.ReadFile(dst)
 	if err != nil {

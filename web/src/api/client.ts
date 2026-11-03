@@ -233,8 +233,8 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
   return s ? `?${s}` : "";
 }
 
-/** Exported so the retarget module (retarget.ts) can build its own request paths
- * without duplicating the encoding rule. */
+/** Exported so the streamed-endpoint modules (headerEdit.ts, refile.ts) can build
+ * their own request paths without duplicating the encoding rule. */
 export const rigPath = (id: string) => `/api/rigs/${encodeURIComponent(id)}`;
 
 const remotePath = (id: string) => `/api/remotes/${encodeURIComponent(id)}`;

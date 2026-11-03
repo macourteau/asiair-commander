@@ -49,11 +49,22 @@ type supersedeArgs struct {
 	// hash to, and the length every archive-side comparison against it will use.
 	archiveSHA256 string
 	archiveSize   int64
-	// retargetSHA256 is the overlay the caller re-applied to srcPath, empty when it
-	// re-applied none. It is not a second spelling of archiveSHA256: the two are the
-	// same value on the re-apply branch and only the caller knows whether that branch
-	// ran, which is what the overlay refusal below turns on.
-	retargetSHA256 string
+	// editSHA256 is the overlay the caller applied to srcPath, empty when it applied
+	// none. It is not a second spelling of archiveSHA256: the two are the same value
+	// whenever an edit was applied and only the caller knows whether one was, which
+	// is what the overlay refusal below turns on.
+	editSHA256 string
+	// kind selects the commit (design header-edits §8): a device revision ("" or
+	// SupersedeRevision), whose commit advances the read row's device anchors and
+	// lifecycle columns, or an operator's header edit (SupersedeEdit), whose commit
+	// writes the archive side, the overlay and the filter on every sharer and nothing
+	// else.
+	kind store.SupersedeKind
+	// headerEdits and filter are the edited overlay and the edited header's
+	// classified filter, written to every sharer by an edit commit; a revision
+	// ignores them.
+	headerEdits model.HeaderEdits
+	filter      string
 }
 
 // supersedeArchive replaces the bytes under one archive name with srcPath's,
@@ -75,7 +86,7 @@ type supersedeArgs struct {
 // exactly the state a held revision leaves behind — a row's dest_path can be a
 // token-suffixed name while candidate 0 is a different frame's file — and keying
 // off the candidate would move dest_path and orphan the file the row (and, for a
-// retargeted frame, retarget_sha256) actually describes.
+// retargeted frame, edit_sha256) actually describes.
 //
 // The intent is written BEFORE step 1 and cleared after step 4, and a failure to
 // persist it aborts before step 1: the crash-safety guarantee is void without it,
@@ -94,13 +105,13 @@ func (w *Worker) supersedeArchive(ctx context.Context, a supersedeArgs) error {
 		// An empty archive anchor turns a perfectly good archive copy into a critical
 		// delete_mismatch on the next pass, so it is refused rather than written.
 		return fmt.Errorf("%w: no archive anchors were proven for %s", errSupersedeRefused, a.srcPath)
-	case f.RetargetSHA256 != "" && a.retargetSHA256 == "":
+	case f.EditSHA256 != "" && a.editSHA256 == "":
 		// The row carries an OBJECT edit and the caller re-applied none, so srcPath holds
 		// the device's unedited bytes. Installing them and advancing the overlay with the
 		// file would put the device's original OBJECT card on the archive while
-		// retarget_sha256 claimed the edit — consequence 2 of the problem
+		// edit_sha256 claimed the edit — consequence 2 of the problem
 		// design frame-lifecycle §11 states, reintroduced, and this time permanently
-		// invisible: archive_sha256, retarget_sha256 and the on-disk hash would all agree,
+		// invisible: archive_sha256, edit_sha256 and the on-disk hash would all agree,
 		// so every later VerifyRead, three-way check and sameArchiveAt passes while the
 		// row's target and the file's OBJECT disagree forever.
 		//
@@ -125,35 +136,7 @@ func (w *Worker) supersedeArchive(ctx context.Context, a supersedeArgs) error {
 	}
 
 	aside := supersedeAsidePath(f.DestPath, f.ArchiveSHA256)
-	in := store.SupersedeIntent{
-		RigID:         w.profileID,
-		DestPath:      f.DestPath,
-		AsidePath:     aside,
-		FrameID:       f.ID,
-		SHA256:        a.sha256,
-		Size:          a.size,
-		Mtime:         a.mtime,
-		ArchiveSHA256: a.archiveSHA256,
-		ArchiveSize:   a.archiveSize,
-		// The overlay is an audit record of what the archive file holds, and this swap
-		// rewrites that file, so the record follows it. The store applies it only to a
-		// row that already carries an overlay, so a frame that was never retargeted
-		// never gains one here.
-		//
-		// It is the archive anchor rather than a.retargetSHA256 because a dest_path
-		// SHARER can carry an overlay the revised row does not, and its record has to
-		// follow the file as well; on the revised row the two are the same value, the
-		// refusal above being what guarantees an edit was actually re-applied.
-		RetargetSHA256: a.archiveSHA256,
-		State:          provenCommitState(f.State),
-		// The grace clock restarts because the device copy has just been read afresh:
-		// the window exists so a second device read is genuinely independent of the
-		// first, and a superseded archive copy has just been read once. The
-		// rule of design frame-lifecycle §8.4 that a re-pull after a crash must not
-		// restart the clock governs a re-pull of IDENTICAL bytes, which this is not.
-		PulledAt:  w.now().Unix(),
-		CreatedAt: w.now().Unix(),
-	}
+	in := w.supersedeIntentFor(a, aside)
 	if err := w.store.PutSupersedeIntent(ctx, in); err != nil {
 		return fmt.Errorf("could not record the supersede intent for %s: %w", f.DestPath, err)
 	}
@@ -213,9 +196,57 @@ func (w *Worker) supersedeArchive(ctx context.Context, a supersedeArgs) error {
 	}
 
 	w.clearSupersedeIntent(commitCtx, f.DestPath)
-	w.log.Info("rig: superseded the archive copy with the device's revision",
-		"frame", f.ID, "dest", f.DestPath, "sharers", sharers)
+	w.log.Info("rig: superseded the archive copy",
+		"edit", a.kind == store.SupersedeEdit, "frame", f.ID, "dest", f.DestPath, "sharers", sharers)
 	return nil
+}
+
+// supersedeIntentFor builds the intent one swap records before step 1, carrying
+// every column its commit writes, by kind.
+func (w *Worker) supersedeIntentFor(a supersedeArgs, aside string) store.SupersedeIntent {
+	f := a.frame
+	in := store.SupersedeIntent{
+		RigID:         w.profileID,
+		DestPath:      f.DestPath,
+		AsidePath:     aside,
+		FrameID:       f.ID,
+		SHA256:        a.sha256,
+		Size:          a.size,
+		Mtime:         a.mtime,
+		ArchiveSHA256: a.archiveSHA256,
+		ArchiveSize:   a.archiveSize,
+		// The overlay is an audit record of what the archive file holds, and this swap
+		// rewrites that file, so the record follows it. The store applies it only to a
+		// row that already carries an overlay, so a frame that was never edited
+		// never gains one here.
+		//
+		// It is the archive anchor rather than a.editSHA256 because a dest_path
+		// SHARER can carry an overlay the revised row does not, and its record has to
+		// follow the file as well; on the revised row the two are the same value, the
+		// refusal in supersedeArchive being what guarantees an edit was actually applied.
+		EditSHA256: a.archiveSHA256,
+		State:      provenCommitState(f.State),
+		// The grace clock restarts because the device copy has just been read afresh:
+		// the window exists so a second device read is genuinely independent of the
+		// first, and a superseded archive copy has just been read once. The
+		// rule of design frame-lifecycle §8.4 that a re-pull after a crash must not
+		// restart the clock governs a re-pull of IDENTICAL bytes, which this is not.
+		PulledAt:  w.now().Unix(),
+		CreatedAt: w.now().Unix(),
+	}
+	if a.kind == store.SupersedeEdit {
+		// An edit read no device copy, so the edit commit writes none of the device
+		// anchors, the state or pulled_at: they are carried here as the row stands,
+		// for the record only, and a recovery replaying the intent days later cannot
+		// restore them either, because the commit's SQL omits them (design
+		// header-edits §8).
+		in.Kind = store.SupersedeEdit
+		in.HeaderEdits = a.headerEdits
+		in.Filter = a.filter
+		in.State = f.State
+		in.PulledAt = f.PulledAt
+	}
+	return in
 }
 
 // supersedeRefusal states why this rig's worker must not swap f's archive copy, or

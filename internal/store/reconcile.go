@@ -118,12 +118,12 @@ func (s *sqlStore) ScanTargets(ctx context.Context, rigID, root string, allRoots
 type FiledSample struct {
 	DestPath string
 	SHA256   string
-	// RetargetSHA256 is the retarget audit record's hash ("" when not retargeted):
-	// what the re-label produced. It is NOT what the auto-link verify compares
+	// EditSHA256 is the edit overlay's audit hash ("" when never edited):
+	// what the edit produced. It is NOT what the auto-link verify compares
 	// against — that is ArchiveSHA256 below, the live archive-side expectation
 	// (design routing-and-filing §9.2, design frame-lifecycle §11.1).
-	RetargetSHA256 string
-	Size           int64
+	EditSHA256 string
+	Size       int64
 	// ArchiveSHA256 and ArchiveSize are what the copy at DestPath must hash to and
 	// the length to hash it over — the archive-side pair the auto-link verify
 	// actually compares against. They are carried explicitly for the same reason
@@ -143,7 +143,7 @@ func (s *sqlStore) FiledSamplesUnderRoot(ctx context.Context, rigID, root string
 		limit = 8
 	}
 	rows, err := s.read.QueryContext(ctx,
-		`SELECT dest_path, sha256, retarget_sha256, size, archive_sha256, archive_size FROM frames
+		`SELECT dest_path, sha256, edit_sha256, size, archive_sha256, archive_size FROM frames
 		 WHERE rig_id=? AND state IN ('verified','deleted','unclassified')
 		   AND dest_path IS NOT NULL AND dest_path <> '' AND sha256 <> '' AND size > 0
 		 ORDER BY id DESC`, rigID)
@@ -154,13 +154,13 @@ func (s *sqlStore) FiledSamplesUnderRoot(ctx context.Context, rigID, root string
 	var out []FiledSample
 	for rows.Next() && len(out) < limit {
 		var s FiledSample
-		var retarget sql.NullString // nullable: "" when the frame was never retargeted
+		var edit sql.NullString // nullable: "" when the frame was never edited
 		var archiveSHA sql.NullString
 		var archiveSize sql.NullInt64
-		if err := rows.Scan(&s.DestPath, &s.SHA256, &retarget, &s.Size, &archiveSHA, &archiveSize); err != nil {
+		if err := rows.Scan(&s.DestPath, &s.SHA256, &edit, &s.Size, &archiveSHA, &archiveSize); err != nil {
 			return nil, fmt.Errorf("filed sample row: %w", err)
 		}
-		s.RetargetSHA256 = retarget.String
+		s.EditSHA256 = edit.String
 		s.ArchiveSHA256 = archiveSHA.String
 		s.ArchiveSize = archiveSize.Int64
 		if longestRoot(s.DestPath, allRoots) == root {

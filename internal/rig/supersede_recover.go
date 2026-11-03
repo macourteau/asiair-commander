@@ -108,7 +108,11 @@ func recoverSupersedeIntent(ctx context.Context, st store.Store, lfs localfs.Loc
 	// ours writes that path while recovery runs, so a disagreement means something
 	// outside the application put a different file there — and committing the
 	// intent's anchors against it would anchor every sharing row to bytes that are
-	// not there. It costs a Stat, not a read.
+	// not there. It costs a Stat, not a read. It does not tell the installed file
+	// from the copy set aside when the two have one length — an edit that inserts a
+	// card into a free slot (design header-edits §4.1) — and this arm does not need
+	// it to: the aside's presence proves step 1 ran, the canonical file's proves
+	// step 2 did, and an open intent keeps every other writer off the path.
 	if size != in.ArchiveSize {
 		logger.Error("rig: the canonical path of an open supersede intent holds an unexpected file; leaving it open",
 			"rig", in.RigID, "dest", in.DestPath, "size", size, "want", in.ArchiveSize)

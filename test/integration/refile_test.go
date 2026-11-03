@@ -88,8 +88,8 @@ func seedPanelFrames(t *testing.T, dev *device.Fake, share, workDir string) []st
 		for col := 1; col <= refilePanelC; col++ {
 			target := panelTarget(row, col)
 			dst := filepath.Join(workDir, target+".fit")
-			if _, err := header.RewriteObject(src, dst, target); err != nil {
-				t.Fatalf("RewriteObject(%q): %v", target, err)
+			if _, err := header.EditCards(src, dst, []header.CardEdit{{Key: "OBJECT", Value: target}}); err != nil {
+				t.Fatalf("EditCards(OBJECT=%q): %v", target, err)
 			}
 			data, err := os.ReadFile(dst)
 			if err != nil {

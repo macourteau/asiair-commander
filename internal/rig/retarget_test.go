@@ -124,7 +124,7 @@ func hashOnDisk(t *testing.T, path string) string {
 // TestRetarget_PreservesOriginalSHA256 (INV-1) is the cardinal safety invariant: a
 // retarget rewrites the archive's OBJECT card and re-files it, but the sha256 column —
 // the device-correlation anchor the untouched device original still hashes to — is never
-// mutated. The edited archive hash lands in retarget_sha256 instead.
+// mutated. The edited archive hash lands in edit_sha256 instead.
 func TestRetarget_PreservesOriginalSHA256(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
@@ -133,12 +133,12 @@ func TestRetarget_PreservesOriginalSHA256(t *testing.T) {
 	origSHA := f.SHA256
 	oldDest := f.DestPath
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
-	if res.Status != "retargeted" {
-		t.Fatalf("status=%q reason=%q, want retargeted", res.Status, res.Reason)
+	if res.Status != "edited" {
+		t.Fatalf("status=%q reason=%q, want edited", res.Status, res.Reason)
 	}
 
 	got, ok, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -148,14 +148,14 @@ func TestRetarget_PreservesOriginalSHA256(t *testing.T) {
 	if got.SHA256 != origSHA {
 		t.Fatalf("sha256 mutated: %q != original %q (INV-1)", got.SHA256, origSHA)
 	}
-	if got.RetargetSHA256 == "" || got.RetargetSHA256 == origSHA {
-		t.Fatalf("retarget_sha256=%q, want the edited-archive hash (non-empty, != sha256)", got.RetargetSHA256)
+	if got.EditSHA256 == "" || got.EditSHA256 == origSHA {
+		t.Fatalf("edit_sha256=%q, want the edited-archive hash (non-empty, != sha256)", got.EditSHA256)
 	}
 	if got.Target != "M31" {
 		t.Fatalf("target=%q, want M31", got.Target)
 	}
-	if got.RetargetFrom != "C-2025 A6" {
-		t.Fatalf("retarget_from=%q, want the original target", got.RetargetFrom)
+	if objectFrom(got.HeaderEdits) != "C-2025 A6" {
+		t.Fatalf("header_edits' OBJECT from=%q, want the original target", objectFrom(got.HeaderEdits))
 	}
 	if got.State != model.StateVerified {
 		t.Fatalf("state=%s, want verified (retarget is not a lifecycle change)", got.State)
@@ -163,9 +163,9 @@ func TestRetarget_PreservesOriginalSHA256(t *testing.T) {
 	if !strings.Contains(got.DestPath, "M31") || got.DestPath == oldDest {
 		t.Fatalf("dest=%q, want a new M31 path", got.DestPath)
 	}
-	// The edited archive on disk hashes to retarget_sha256, and the old file is gone.
-	if h := hashOnDisk(t, got.DestPath); h != got.RetargetSHA256 {
-		t.Fatalf("archive hash %q != retarget_sha256 %q", h, got.RetargetSHA256)
+	// The edited archive on disk hashes to edit_sha256, and the old file is gone.
+	if h := hashOnDisk(t, got.DestPath); h != got.EditSHA256 {
+		t.Fatalf("archive hash %q != edit_sha256 %q", h, got.EditSHA256)
 	}
 	if _, err := os.Stat(oldDest); !os.IsNotExist(err) {
 		t.Fatalf("old archive not removed: %v", err)
@@ -177,7 +177,7 @@ func TestRetarget_PreservesOriginalSHA256(t *testing.T) {
 
 // TestRetarget_RefusesDriftedArchive (INV-3) refuses to edit an archive whose on-disk
 // bytes no longer hash to archiveHash(f): editing drifted content would bake corruption
-// into retarget_sha256 and authorize deleting the correct device original.
+// into edit_sha256 and authorize deleting the correct device original.
 func TestRetarget_RefusesDriftedArchive(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
@@ -189,16 +189,16 @@ func TestRetarget_RefusesDriftedArchive(t *testing.T) {
 		return strings.Repeat("0", len(honest))
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
 	if res.Status != "failed" {
 		t.Fatalf("status=%q, want failed on a drifted archive", res.Status)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.SHA256 != f.SHA256 || got.RetargetSHA256 != "" {
-		t.Fatalf("drifted-archive refusal must not touch the row: sha=%q retarget=%q", got.SHA256, got.RetargetSHA256)
+	if got.SHA256 != f.SHA256 || got.EditSHA256 != "" {
+		t.Fatalf("drifted-archive refusal must not touch the row: sha=%q retarget=%q", got.SHA256, got.EditSHA256)
 	}
 	if got.Target != "C-2025 A6" || got.DestPath != f.DestPath {
 		t.Fatalf("drifted-archive refusal must not move the frame: target=%q dest=%q", got.Target, got.DestPath)
@@ -209,7 +209,7 @@ func TestRetarget_RefusesDriftedArchive(t *testing.T) {
 }
 
 // TestRetarget_RefusesAtRestCorruption (F1, INV-4) proves the first retarget refuses to
-// mint retarget_sha256 from unverified at-rest bytes: when a write fault makes the edited
+// mint edit_sha256 from unverified at-rest bytes: when a write fault makes the edited
 // temp read back a hash different from the stream-derived expectation (rr.OutputSHA256),
 // the retarget fails, the overlay is never set, the old archive is byte-intact, and the
 // device original survives — so a corrupted archive can never become the delete anchor.
@@ -225,26 +225,26 @@ func TestRetarget_RefusesAtRestCorruption(t *testing.T) {
 	// hash different from the honest streamed bytes. The archive read-back (step 3)
 	// stays honest so the drift guard passes and the step-6 at-rest check is reached.
 	h.lfs.CorruptAfterWrite = func(path, honest string) string {
-		if strings.Contains(path, "asiair-retarget") {
+		if strings.Contains(path, "asiair-edit-") {
 			return strings.Repeat("0", len(honest))
 		}
 		return honest
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
 	if res.Status != "failed" {
 		t.Fatalf("status=%q reason=%q, want failed on an at-rest corrupted edit", res.Status, res.Reason)
 	}
-	if !strings.Contains(res.Reason, "at-rest verify mismatch") {
+	if !strings.Contains(res.Reason, "(write fault)") {
 		t.Fatalf("reason=%q, want the at-rest write-fault reason", res.Reason)
 	}
 
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 != "" {
-		t.Fatalf("retarget_sha256 must NOT be set on a corrupted edit; got %q", got.RetargetSHA256)
+	if got.EditSHA256 != "" {
+		t.Fatalf("edit_sha256 must NOT be set on a corrupted edit; got %q", got.EditSHA256)
 	}
 	if got.SHA256 != f.SHA256 {
 		t.Fatalf("sha256 mutated: %q != %q", got.SHA256, f.SHA256)
@@ -267,7 +267,7 @@ func TestRetarget_RefusesAtRestCorruption(t *testing.T) {
 
 // TestRetarget_FailsOnCommitFailure (F2) proves a swallowed UpsertFrame failure inside
 // the edited-archive filing does not report success: fileFrom→recordFiled logs and still
-// returns true, so retargetFrame must re-read the row and refuse when the overlay did not
+// returns true, so editFrame must re-read the row and refuse when the overlay did not
 // persist — leaving the old archive and device original intact and the row un-retargeted.
 func TestRetarget_FailsOnCommitFailure(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -281,9 +281,9 @@ func TestRetarget_FailsOnCommitFailure(t *testing.T) {
 	h.w.store = fs
 	fs.failUpsert = true
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
 	if res.Status != "failed" {
 		t.Fatalf("status=%q reason=%q, want failed when the commit does not persist", res.Status, res.Reason)
@@ -291,9 +291,9 @@ func TestRetarget_FailsOnCommitFailure(t *testing.T) {
 
 	fs.failUpsert = false // let the verification read-backs below succeed
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 != "" || got.Target != "C-2025 A6" || got.DestPath != oldDest {
+	if got.EditSHA256 != "" || got.Target != "C-2025 A6" || got.DestPath != oldDest {
 		t.Fatalf("row must stay un-retargeted after a failed commit: target=%q dest=%q retarget=%q",
-			got.Target, got.DestPath, got.RetargetSHA256)
+			got.Target, got.DestPath, got.EditSHA256)
 	}
 	if hd := hashOnDisk(t, oldDest); hd != origArchiveHash {
 		t.Fatalf("old archive changed after a failed commit: %q != %q", hd, origArchiveHash)
@@ -303,21 +303,30 @@ func TestRetarget_FailsOnCommitFailure(t *testing.T) {
 	}
 }
 
+// objectFrom is the original target an overlay's OBJECT entry records, "" when it
+// has no entry or the entry records none.
+func objectFrom(e model.HeaderEdits) string {
+	if h, ok := e.Lookup("OBJECT"); ok && h.From != nil {
+		return *h.From
+	}
+	return ""
+}
+
 // TestRetarget_Idempotent_RetargetFromStable (INV-7) proves a repeat retarget edits from
-// the CURRENT archive, updates retarget_sha256, and keeps retarget_from pinned to the
-// FIRST original target across the chain.
+// the CURRENT archive, updates edit_sha256, and keeps the OBJECT entry's from pinned
+// to the FIRST original target across the chain while its value follows the label.
 func TestRetarget_Idempotent_RetargetFromStable(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
 
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("first retarget: status=%q err=%v", res.Status, err)
 	}
 	afterFirst, _, _ := h.store.GetFrameByID(ctx, f.ID)
 
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M42"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M42"); err != nil || res.Status != "edited" {
 		t.Fatalf("second retarget: status=%q err=%v", res.Status, err)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -325,17 +334,20 @@ func TestRetarget_Idempotent_RetargetFromStable(t *testing.T) {
 	if got.Target != "M42" {
 		t.Fatalf("target=%q, want M42", got.Target)
 	}
-	if got.RetargetFrom != "C-2025 A6" {
-		t.Fatalf("retarget_from=%q, want the FIRST original across repeats (INV-7)", got.RetargetFrom)
+	if objectFrom(got.HeaderEdits) != "C-2025 A6" {
+		t.Fatalf("OBJECT from=%q, want the FIRST original across repeats (INV-7)", objectFrom(got.HeaderEdits))
 	}
-	if got.RetargetSHA256 == afterFirst.RetargetSHA256 {
-		t.Fatalf("retarget_sha256 not updated on the second retarget")
+	if len(got.HeaderEdits) != 1 || got.HeaderEdits[0].Value != "M42" {
+		t.Fatalf("header_edits=%+v, want one OBJECT entry valued M42", got.HeaderEdits)
+	}
+	if got.EditSHA256 == afterFirst.EditSHA256 {
+		t.Fatalf("edit_sha256 not updated on the second retarget")
 	}
 	if got.SHA256 != f.SHA256 {
 		t.Fatalf("sha256 mutated across repeats: %q != %q", got.SHA256, f.SHA256)
 	}
-	if h := hashOnDisk(t, got.DestPath); h != got.RetargetSHA256 {
-		t.Fatalf("M42 archive hash %q != retarget_sha256 %q", h, got.RetargetSHA256)
+	if h := hashOnDisk(t, got.DestPath); h != got.EditSHA256 {
+		t.Fatalf("M42 archive hash %q != edit_sha256 %q", h, got.EditSHA256)
 	}
 }
 
@@ -354,11 +366,11 @@ func TestRetarget_ScopeGuards(t *testing.T) {
 	if err := h.store.UpdateFrame(ctx, &held); err != nil {
 		t.Fatal(err)
 	}
-	res, _ := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, _ := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if res.Status != "skipped" {
 		t.Fatalf("held frame: status=%q, want skipped", res.Status)
 	}
-	pv := h.w.previewRetarget(ctx, []int64{f.ID}, "M31")
+	pv := h.w.previewEdit(ctx, []int64{f.ID}, "OBJECT", "M31")
 	if len(pv) != 1 || pv[0].Eligible {
 		t.Fatalf("held frame preview must be ineligible; got %+v", pv)
 	}
@@ -370,7 +382,7 @@ func TestRetarget_ScopeGuards(t *testing.T) {
 	if err := h.store.UpdateFrame(ctx, &nodest); err != nil {
 		t.Fatal(err)
 	}
-	res, _ = h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, _ = h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if res.Status != "skipped" {
 		t.Fatalf("no-dest frame: status=%q, want skipped", res.Status)
 	}
@@ -395,12 +407,12 @@ func TestRetarget_DeletedStaysDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "M31")
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31")
 	if err != nil {
-		t.Fatalf("serviceRetarget: %v", err)
+		t.Fatalf("serviceEdit: %v", err)
 	}
-	if res.Status != "retargeted" {
-		t.Fatalf("status=%q reason=%q, want retargeted", res.Status, res.Reason)
+	if res.Status != "edited" {
+		t.Fatalf("status=%q reason=%q, want edited", res.Status, res.Reason)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
 	if got.State != model.StateDeleted {
@@ -409,22 +421,22 @@ func TestRetarget_DeletedStaysDeleted(t *testing.T) {
 	if got.DeletedAt != deletedAt {
 		t.Fatalf("deleted_at=%d, want %d preserved across the relabel (F3)", got.DeletedAt, deletedAt)
 	}
-	if got.Target != "M31" || got.RetargetSHA256 == "" {
-		t.Fatalf("deleted relabel must still move/overlay: target=%q retarget=%q", got.Target, got.RetargetSHA256)
+	if got.Target != "M31" || got.EditSHA256 == "" {
+		t.Fatalf("deleted relabel must still move/overlay: target=%q retarget=%q", got.Target, got.EditSHA256)
 	}
 }
 
-// TestReapplyRetarget_OnDifferJitter (INV-8) proves a re-pull of a retargeted frame's
+// TestReapplyEdits_OnDifferJitter (INV-8) proves a re-pull of a retargeted frame's
 // ORIGINAL device bytes — triggered by a device-mtime jitter of identical content — re-
 // applies the OBJECT edit at the filing chokepoint, so the archive keeps its corrected
-// M31 label instead of reverting to the original folder, and retarget_sha256 is
+// M31 label instead of reverting to the original folder, and edit_sha256 is
 // preserved.
-func TestReapplyRetarget_OnDifferJitter(t *testing.T) {
+func TestReapplyEdits_OnDifferJitter(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	before, _, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -444,8 +456,8 @@ func TestReapplyRetarget_OnDifferJitter(t *testing.T) {
 	if !strings.Contains(got.DestPath, "M31") {
 		t.Fatalf("archive reverted out of M31: %q", got.DestPath)
 	}
-	if got.RetargetSHA256 != before.RetargetSHA256 {
-		t.Fatalf("retarget_sha256 changed on an identical-content re-pull: %q != %q", got.RetargetSHA256, before.RetargetSHA256)
+	if got.EditSHA256 != before.EditSHA256 {
+		t.Fatalf("edit_sha256 changed on an identical-content re-pull: %q != %q", got.EditSHA256, before.EditSHA256)
 	}
 	if got.SHA256 != before.SHA256 {
 		t.Fatalf("sha256 mutated on re-pull: %q != %q", got.SHA256, before.SHA256)
@@ -456,14 +468,14 @@ func TestReapplyRetarget_OnDifferJitter(t *testing.T) {
 }
 
 // TestDiffer_PreservesOverlayOnIdenticalContent (INV-10) is the overlay-preservation half:
-// an identical-content re-pull keeps retarget_sha256 (via the re-apply), while
+// an identical-content re-pull keeps edit_sha256 (via the re-apply), while
 // TestDiffer_ResetsOverlayOnNewContent covers the reset half.
 func TestDiffer_PreservesOverlayOnIdenticalContent(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	before, _, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -473,21 +485,21 @@ func TestDiffer_PreservesOverlayOnIdenticalContent(t *testing.T) {
 	h.cycle()
 
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 != before.RetargetSHA256 || got.RetargetSHA256 == "" {
-		t.Fatalf("overlay not preserved on identical-content re-pull: %q != %q (INV-10)", got.RetargetSHA256, before.RetargetSHA256)
+	if got.EditSHA256 != before.EditSHA256 || got.EditSHA256 == "" {
+		t.Fatalf("overlay not preserved on identical-content re-pull: %q != %q (INV-10)", got.EditSHA256, before.EditSHA256)
 	}
 }
 
 // TestDiffer_ResetsOverlayOnNewContent (INV-10) proves genuinely-new content at the same
 // source path resets the overlay to NULL: the re-apply rule fires only when the streamed
 // bytes match prior.SHA256, so different bytes file as the new frame they are (a stale
-// retarget_sha256 would otherwise hang the frame held).
+// edit_sha256 would otherwise hang the frame held).
 func TestDiffer_ResetsOverlayOnNewContent(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 
@@ -504,11 +516,11 @@ func TestDiffer_ResetsOverlayOnNewContent(t *testing.T) {
 	h.cycle()
 
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	if got.RetargetSHA256 != "" {
-		t.Fatalf("overlay must reset to NULL on genuinely-new content; got %q (INV-10)", got.RetargetSHA256)
+	if got.EditSHA256 != "" {
+		t.Fatalf("overlay must reset to NULL on genuinely-new content; got %q (INV-10)", got.EditSHA256)
 	}
-	if got.RetargetFrom != "" {
-		t.Fatalf("retarget_from must reset with the overlay; got %q", got.RetargetFrom)
+	if objectFrom(got.HeaderEdits) != "" {
+		t.Fatalf("header_edits' OBJECT from must reset with the overlay; got %q", objectFrom(got.HeaderEdits))
 	}
 	// The new bytes carry the ORIGINAL OBJECT, so the frame files back under its own
 	// label, not M31.
@@ -520,15 +532,15 @@ func TestDiffer_ResetsOverlayOnNewContent(t *testing.T) {
 	}
 }
 
-// TestReapplyRetarget_OnDeletedReadopt (INV-8) proves the deleted-readopt path re-applies
+// TestReapplyEdits_OnDeletedReadopt (INV-8) proves the deleted-readopt path re-applies
 // the edit: a retargeted frame marked deleted whose device original reappears is re-
 // archived under its corrected label with the overlay preserved, not reverted.
-func TestReapplyRetarget_OnDeletedReadopt(t *testing.T) {
+func TestReapplyEdits_OnDeletedReadopt(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	before, _, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -547,8 +559,8 @@ func TestReapplyRetarget_OnDeletedReadopt(t *testing.T) {
 	if got.Target != "M31" || !strings.Contains(got.DestPath, "M31") {
 		t.Fatalf("deleted-readopt reverted the label: target=%q dest=%q (INV-8)", got.Target, got.DestPath)
 	}
-	if got.RetargetSHA256 != before.RetargetSHA256 {
-		t.Fatalf("overlay not preserved on readopt: %q != %q", got.RetargetSHA256, before.RetargetSHA256)
+	if got.EditSHA256 != before.EditSHA256 {
+		t.Fatalf("overlay not preserved on readopt: %q != %q", got.EditSHA256, before.EditSHA256)
 	}
 	if got.State != model.StateVerified {
 		t.Fatalf("readopt should re-verify the frame; state=%s", got.State)
@@ -557,7 +569,7 @@ func TestReapplyRetarget_OnDeletedReadopt(t *testing.T) {
 
 // TestDelete_RetargetedThreeWay (INV-5) is the delete-path safety proof for a retargeted
 // frame: the device original still hashes to sha256 (never touched), the NAS archive
-// hashes to retarget_sha256, and the three-way check authorizes the delete only because
+// hashes to edit_sha256, and the three-way check authorizes the delete only because
 // the archive side compares to archiveHash(f) and the device side to sha256.
 func TestDelete_RetargetedThreeWay(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -568,13 +580,13 @@ func TestDelete_RetargetedThreeWay(t *testing.T) {
 
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
-	// The archive now hashes to retarget_sha256; the device original is untouched.
-	if got.RetargetSHA256 == "" || got.SHA256 == got.RetargetSHA256 {
-		t.Fatalf("setup: expected a retargeted overlay, got sha=%q retarget=%q", got.SHA256, got.RetargetSHA256)
+	// The archive now hashes to edit_sha256; the device original is untouched.
+	if got.EditSHA256 == "" || got.SHA256 == got.EditSHA256 {
+		t.Fatalf("setup: expected a retargeted overlay, got sha=%q retarget=%q", got.SHA256, got.EditSHA256)
 	}
 
 	h.nowVal = h.nowVal.Add(2 * time.Hour) // past grace → deletion-eligible
@@ -595,7 +607,7 @@ func TestDelete_RetargetedThreeWay(t *testing.T) {
 
 // TestRestoreOne_RetargetedPresentRecognized proves restoreOne's "back and good"
 // pre-check compares to archiveHash(f): a healthy retargeted NAS copy (hashing to
-// retarget_sha256) is recognized and the request cleared, rather than pinning the device
+// edit_sha256) is recognized and the request cleared, rather than pinning the device
 // original behind a standing restore request (restore.go:100, design
 // routing-and-filing §9.4).
 func TestRestoreOne_RetargetedPresentRecognized(t *testing.T) {
@@ -604,7 +616,7 @@ func TestRestoreOne_RetargetedPresentRecognized(t *testing.T) {
 	h.resolver.resolveAddr, h.resolver.resolveOnline = "10.0.0.1", true
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	h.setMissing(t, f.ID, 0)
@@ -624,7 +636,7 @@ func TestRestoreOne_RetargetedPresentRecognized(t *testing.T) {
 // TestRestore_ReappliesRetarget proves the restore path re-applies the OBJECT edit: a
 // retargeted frame whose NAS copy was culled is re-pulled from the (original-carrying)
 // device original, re-edited to the corrected label, and its at-rest copy verifies
-// against archiveHash(f) — so the restored archive hashes to retarget_sha256, not the
+// against archiveHash(f) — so the restored archive hashes to edit_sha256, not the
 // original (design routing-and-filing §9.4, delete.go:546).
 func TestRestore_ReappliesRetarget(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
@@ -632,12 +644,12 @@ func TestRestore_ReappliesRetarget(t *testing.T) {
 	h.resolver.resolveAddr, h.resolver.resolveOnline = "10.0.0.1", true
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
 	m31Dest := got.DestPath
-	wantHash := got.RetargetSHA256
+	wantHash := got.EditSHA256
 
 	if err := os.Remove(m31Dest); err != nil { // operator culled the retargeted NAS copy
 		t.Fatal(err)
@@ -650,15 +662,15 @@ func TestRestore_ReappliesRetarget(t *testing.T) {
 	h.cycle() // restorePhase re-pulls the original and re-applies the edit
 
 	if hd := hashOnDisk(t, m31Dest); hd != wantHash {
-		t.Fatalf("restored archive hash %q != retarget_sha256 %q — the edit was not re-applied", hd, wantHash)
+		t.Fatalf("restored archive hash %q != edit_sha256 %q — the edit was not re-applied", hd, wantHash)
 	}
 	after, _, _ := h.store.GetFrameByID(ctx, f.ID)
 	if after.RestoreRequestedAt != 0 || after.MissingSeenAt != 0 {
 		t.Fatalf("a completed restore must clear both marks; missing=%d restore=%d",
 			after.MissingSeenAt, after.RestoreRequestedAt)
 	}
-	if after.SHA256 != f.SHA256 || after.RetargetSHA256 != wantHash {
-		t.Fatalf("restore must keep the overlay: sha=%q retarget=%q", after.SHA256, after.RetargetSHA256)
+	if after.SHA256 != f.SHA256 || after.EditSHA256 != wantHash {
+		t.Fatalf("restore must keep the overlay: sha=%q retarget=%q", after.SHA256, after.EditSHA256)
 	}
 }
 
@@ -686,16 +698,16 @@ func TestParseBinningToken(t *testing.T) {
 	}
 }
 
-// TestPreviewRetarget_ProjectsPathWithoutIO checks the read-only projection: an eligible
+// TestPreviewEdit_ProjectsPathWithoutIO checks the read-only projection: an eligible
 // light previews its new M31 path (flagging the night approximation) and never mutates
 // night_counters (Night stays approximate, AssignNight is not called).
-func TestPreviewRetarget_ProjectsPathWithoutIO(t *testing.T) {
+func TestPreviewEdit_ProjectsPathWithoutIO(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
 	src := "Autorun/Light/C-2025 A6/Light_0001.fit"
 	f := fileLight(t, h, src)
 
-	pv := h.w.previewRetarget(ctx, []int64{f.ID}, "M31")
+	pv := h.w.previewEdit(ctx, []int64{f.ID}, "OBJECT", "M31")
 	if len(pv) != 1 {
 		t.Fatalf("want 1 preview, got %d", len(pv))
 	}
@@ -703,8 +715,8 @@ func TestPreviewRetarget_ProjectsPathWithoutIO(t *testing.T) {
 	if !p.Eligible {
 		t.Fatalf("light should be eligible; reason=%q", p.Reason)
 	}
-	if p.CurrentTarget != "C-2025 A6" {
-		t.Fatalf("current_target=%q", p.CurrentTarget)
+	if p.CurrentValue != "C-2025 A6" {
+		t.Fatalf("current_target=%q", p.CurrentValue)
 	}
 	if !strings.Contains(p.NewPath, filepath.Join("M31", "FRA300")) {
 		t.Fatalf("new_path=%q, want it under M31/FRA300", p.NewPath)
@@ -745,9 +757,9 @@ func TestRetarget_JoinsExistingNightLedger(t *testing.T) {
 		wantFiledUnder(t, h, seeded, filepath.Join("NGC7380", "FRA300", "S", fmt.Sprintf("NIGHT_%d", i+1)))
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "NGC7380")
-	if err != nil || res.Status != "retargeted" {
-		t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "NGC7380")
+	if err != nil || res.Status != "edited" {
+		t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 
 	got, ok, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -776,9 +788,9 @@ func TestRetarget_JoinsExistingNightLedger_ExactSpelling(t *testing.T) {
 		}
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "NGC 7380")
-	if err != nil || res.Status != "retargeted" {
-		t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "NGC 7380")
+	if err != nil || res.Status != "edited" {
+		t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 
 	got, _, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -803,9 +815,9 @@ func TestRetarget_FoldsTargetCase(t *testing.T) {
 		fileLightAs(t, h, src, "NGC 7380", dateObs)
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "ngc 7380")
-	if err != nil || res.Status != "retargeted" {
-		t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "ngc 7380")
+	if err != nil || res.Status != "edited" {
+		t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 
 	got, ok, _ := h.store.GetFrameByID(ctx, f.ID)
@@ -842,9 +854,9 @@ func TestAdoptsNightHeldByDestinationFolder(t *testing.T) {
 				fileLightAs(t, h, fmt.Sprintf("Autorun/Light/dest/Light_%04d.fit", i+1), "NGC 7380", dateObs)
 			}
 
-			res, err := h.w.serviceRetarget(ctx, f.ID, spelling)
-			if err != nil || res.Status != "retargeted" {
-				t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+			res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", spelling)
+			if err != nil || res.Status != "edited" {
+				t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 			}
 			wantFiledUnder(t, h, reload(t, h, f.ID), filepath.Join("NGC7380", "FRA300", "S", "NIGHT_3"))
 		})
@@ -865,9 +877,9 @@ func TestMintsAboveFolderHighWater(t *testing.T) {
 		fileLightAs(t, h, fmt.Sprintf("Autorun/Light/dest/Light_%04d.fit", i+1), "NGC 7380", dateObs)
 	}
 
-	res, err := h.w.serviceRetarget(ctx, f.ID, "NGC7380")
-	if err != nil || res.Status != "retargeted" {
-		t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+	res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "NGC7380")
+	if err != nil || res.Status != "edited" {
+		t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 	wantFiledUnder(t, h, reload(t, h, f.ID), filepath.Join("NGC7380", "FRA300", "S", "NIGHT_4"))
 }
@@ -981,9 +993,9 @@ func TestAdoptedNightIsDecidedByFrameCount(t *testing.T) {
 				wantFiledUnder(t, h, misfiled, filepath.Join("NGC7380", "FRA300", "S", "NIGHT_1"))
 			}
 
-			res, err := h.w.serviceRetarget(ctx, subject.ID, "NGC7380")
-			if err != nil || res.Status != "retargeted" {
-				t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+			res, err := h.w.serviceEdit(ctx, subject.ID, "OBJECT", "NGC7380")
+			if err != nil || res.Status != "edited" {
+				t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 			}
 			wantFiledUnder(t, h, reload(t, h, subject.ID), filepath.Join("NGC7380", "FRA300", "S", tc.want))
 		})
@@ -1007,9 +1019,9 @@ func TestOneObservingDatePerNightFolder(t *testing.T) {
 	renamed := fileLightAs(t, h, "Autorun/Light/renamed/Light_0001.fit", "NGC7380", dateObsNight4)
 	wantFiledUnder(t, h, renamed, filepath.Join("NGC7380", "FRA300", "S", "NIGHT_4"))
 
-	res, err := h.w.serviceRetarget(ctx, subject.ID, "NGC7380")
-	if err != nil || res.Status != "retargeted" {
-		t.Fatalf("serviceRetarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
+	res, err := h.w.serviceEdit(ctx, subject.ID, "OBJECT", "NGC7380")
+	if err != nil || res.Status != "edited" {
+		t.Fatalf("serviceEdit: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 	wantFiledUnder(t, h, reload(t, h, subject.ID), filepath.Join("NGC7380", "FRA300", "S", "NIGHT_3"))
 
@@ -1042,7 +1054,7 @@ func TestOneObservingDatePerNightFolder(t *testing.T) {
 	}
 }
 
-// TestRetargetKeepsSanitizedTargetsEligible: RewriteObject sanitizes before writing
+// TestRetargetKeepsSanitizedTargetsEligible: the OBJECT rule sanitizes before writing
 // the OBJECT card, so a reserved Windows name, a trailing dot and an illegal
 // character all retarget successfully — landing as "_CON", "M31" and "NGC_7380" —
 // and the preview must call them eligible rather than refuse them.
@@ -1057,13 +1069,13 @@ func TestRetargetKeepsSanitizedTargetsEligible(t *testing.T) {
 			ctx := context.Background()
 			f := fileLight(t, h, "Autorun/Light/C-2025 A6/Light_0001.fit")
 
-			pv := h.w.previewRetarget(ctx, []int64{f.ID}, tc.typed)
+			pv := h.w.previewEdit(ctx, []int64{f.ID}, "OBJECT", tc.typed)
 			if len(pv) != 1 || !pv[0].Eligible {
 				t.Fatalf("preview of %q must stay eligible: %+v", tc.typed, pv)
 			}
-			res, err := h.w.serviceRetarget(ctx, f.ID, tc.typed)
-			if err != nil || res.Status != "retargeted" {
-				t.Fatalf("serviceRetarget(%q): status=%q reason=%q err=%v", tc.typed, res.Status, res.Reason, err)
+			res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", tc.typed)
+			if err != nil || res.Status != "edited" {
+				t.Fatalf("serviceEdit(%q): status=%q reason=%q err=%v", tc.typed, res.Status, res.Reason, err)
 			}
 			wantFiledUnder(t, h, reload(t, h, f.ID), filepath.Join(tc.folder, "FRA300", "S", "NIGHT_1"))
 		})
@@ -1120,12 +1132,12 @@ func nightOf(t *testing.T, path string) string {
 // directory to equal the one apply actually filed each frame into. The equality is
 // asserted over frames apply files — one that fails earlier (hash drift, at-rest
 // verify) consumes no ordinal, while the preview already advanced its running maximum.
-func wantPreviewMatchesApply(t *testing.T, h *harness, ids []int64, target string) []model.RetargetPreview {
+func wantPreviewMatchesApply(t *testing.T, h *harness, ids []int64, target string) []model.EditPreview {
 	t.Helper()
 	ctx := context.Background()
 
 	before := nightCounterRows(t, h)
-	pv := h.w.previewRetarget(ctx, ids, target)
+	pv := h.w.previewEdit(ctx, ids, "OBJECT", target)
 	if after := nightCounterRows(t, h); !slices.Equal(before, after) {
 		t.Fatalf("preview mutated night_counters:\n before %v\n after  %v", before, after)
 	}
@@ -1134,11 +1146,11 @@ func wantPreviewMatchesApply(t *testing.T, h *harness, ids []int64, target strin
 	}
 
 	for i, id := range ids {
-		res, err := h.w.serviceRetarget(ctx, id, target)
+		res, err := h.w.serviceEdit(ctx, id, "OBJECT", target)
 		if err != nil {
-			t.Fatalf("serviceRetarget(%d): %v", id, err)
+			t.Fatalf("serviceEdit(%d): %v", id, err)
 		}
-		if res.Status != "retargeted" {
+		if res.Status != "edited" {
 			continue
 		}
 		if got, want := filepath.Dir(reload(t, h, id).DestPath), filepath.Dir(pv[i].NewPath); got != want {
@@ -1275,7 +1287,7 @@ func TestPreviewSurvivesAFailedNightRead(t *testing.T) {
 	b := fileLightAs(t, h, "Autorun/Light/C-2025 A6/Light_0002.fit", "C-2025 A6", dateObsNight4)
 	h.w.store = &nightReadFailStore{Store: h.store}
 
-	pv := h.w.previewRetarget(ctx, []int64{a.ID, b.ID}, "NGC 7380")
+	pv := h.w.previewEdit(ctx, []int64{a.ID, b.ID}, "OBJECT", "NGC 7380")
 	if len(pv) != 2 {
 		t.Fatalf("want 2 preview rows, got %d", len(pv))
 	}
@@ -1320,7 +1332,7 @@ func TestPreviewReportsExistingSpellings(t *testing.T) {
 		h := newHarness(t, emmc, header.New())
 		subject := seed(t, h)
 
-		pv := h.w.previewRetarget(context.Background(), []int64{subject.ID}, "NGC 7380")
+		pv := h.w.previewEdit(context.Background(), []int64{subject.ID}, "OBJECT", "NGC 7380")
 		if got := nightOf(t, pv[0].NewPath); got != "NIGHT_3" {
 			t.Fatalf("projected %s, want NIGHT_3", got)
 		}
@@ -1335,7 +1347,7 @@ func TestPreviewReportsExistingSpellings(t *testing.T) {
 		h := newHarness(t, emmc, header.New())
 		subject := seed(t, h)
 
-		pv := h.w.previewRetarget(context.Background(), []int64{subject.ID}, "NGC  7380")
+		pv := h.w.previewEdit(context.Background(), []int64{subject.ID}, "OBJECT", "NGC  7380")
 		if len(pv[0].ExistingSpellings) != 0 {
 			t.Errorf("existing_spellings=%q, want none: the folder holds this exact spelling",
 				pv[0].ExistingSpellings)

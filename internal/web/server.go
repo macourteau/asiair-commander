@@ -102,12 +102,11 @@ type Supervisor interface {
 	// `deleted` rows. dir and olderThanDays ride along only for the audit line.
 	ForgetFrame(id string, frameID int64) error
 	ForgetLeftovers(id, dir string, olderThanDays int, ids []int64) (int, error)
-	// Frame retargeting (design routing-and-filing §9.6): PreviewRetarget is a
-	// read-only projection; RetargetFrame moves one frame's archive to the new target
-	// (a ~116 MB read+write per frame, so the Manager bounds it with a generous
-	// timeout).
-	RetargetFrame(id string, frameID int64, newTarget string) (model.RetargetResult, error)
-	PreviewRetarget(id string, ids []int64, newTarget string) ([]model.RetargetPreview, error)
+	// Header edits (design header-edits §9.1): PreviewEdit is a read-only
+	// projection; EditFrame sets one allowlisted card on one frame's archive,
+	// re-filing or superseding it in place, and never touches the device original.
+	EditFrame(id string, frameID int64, key, value string) (model.EditResult, error)
+	PreviewEdit(id string, ids []int64, key, value string) ([]model.EditPreview, error)
 	// Re-filing archived frames to the current folder templates. These two are the
 	// only methods here that take a context, deliberately: the operator's cancel has
 	// to reach the worker, so both derive theirs from the request rather than the
@@ -446,11 +445,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/rigs/{id}/frames/{frameId}/forget", s.guardWrite(s.handleForgetFrame))
 	mux.HandleFunc("POST /api/rigs/{id}/missing-leftovers/forget", s.guardWrite(s.handleForgetLeftovers))
 	mux.HandleFunc("GET /api/library/status", s.guardRead(s.handleLibraryStatus))
-	// Frame retargeting Tools page (design routing-and-filing §9.6): a read-only
-	// preview projection and an apply that streams one NDJSON RetargetResult per
-	// frame as it completes.
-	mux.HandleFunc("POST /api/rigs/{id}/retarget/preview", s.guardWrite(s.handleRetargetPreview))
-	mux.HandleFunc("POST /api/rigs/{id}/retarget/apply", s.guardWrite(s.handleRetargetApply))
+	// Header edits on the Tools page (design header-edits §9.1): a read-only
+	// preview projection and an apply that streams one NDJSON EditResult per frame.
+	mux.HandleFunc("POST /api/rigs/{id}/edit/preview", s.guardWrite(s.handleEditPreview))
+	mux.HandleFunc("POST /api/rigs/{id}/edit/apply", s.guardWrite(s.handleEditApply))
 	// Re-file: a read-only grouped diff and an apply that streams one NDJSON line
 	// per file plus a final summary. The preview is a POST (it carries a scope), so
 	// it takes guardWrite like every other mutation-shaped request.
@@ -567,8 +565,8 @@ var registeredRoutes = []string{
 	"POST /api/rigs/{id}/frames/{frameId}/forget",
 	"POST /api/rigs/{id}/missing-leftovers/forget",
 	"GET /api/library/status",
-	"POST /api/rigs/{id}/retarget/preview",
-	"POST /api/rigs/{id}/retarget/apply",
+	"POST /api/rigs/{id}/edit/preview",
+	"POST /api/rigs/{id}/edit/apply",
 	"POST /api/rigs/{id}/refile/preview",
 	"POST /api/rigs/{id}/refile/apply",
 	"GET /api/frames/{frameId}/image",

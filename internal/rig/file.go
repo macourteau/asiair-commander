@@ -44,33 +44,35 @@ const (
 // variable, parse error) sends the frame to the quarantine area — filed, never
 // deleted, alerted. It returns the frame's terminal outcome for this cycle.
 func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile *model.RigProfile, lf listedFrame, prior *model.Frame, tmpPath, diskHash, dataHash string) fileOutcome {
-	// design routing-and-filing §9.4 re-apply rule: freshly-pulled device bytes carry the
-	// ORIGINAL OBJECT, so a retargeted frame re-pulled here (differ jitter,
-	// deleted-readopt, DB-loss no-row) would otherwise re-classify under the original
-	// header and revert to the old folder. When the incoming bytes are the frame whose
-	// OBJECT card was edited, re-apply the edit before classification and file with the
-	// overlay preserved; genuinely-new content skips the re-apply and resets the overlay.
-	// This one chokepoint makes every re-pull path correct.
+	// The re-apply rule (design header-edits §6, routing-and-filing §9.4): freshly
+	// pulled device bytes carry the device copy's ORIGINAL header, so an edited frame
+	// re-pulled here (differ jitter, deleted re-adopt, DB-loss no-row) would otherwise
+	// re-classify under that header and revert its edits. When the incoming bytes are
+	// the frame whose archive was edited, the row's whole edit list is re-applied
+	// before classification and the frame files with the overlay preserved; genuinely
+	// new content skips the re-apply and resets the overlay. This one chokepoint
+	// makes every re-pull path correct.
 	srcPath, srcHash := tmpPath, diskHash
-	// The archive-side length of the file about to be filed. It is the incoming
-	// length on both branches: the streamed temp was verified at the listed device
-	// length, and the re-apply rewrites exactly one card of THAT file, so the edit it
-	// produces has the incoming length too (design frame-lifecycle §11.11:
-	// every assertion around the rewrite is re-anchored to the file in hand).
+	// The archive-side length of the file about to be filed: the incoming length, or
+	// the re-applied edit's, which an insertion grows by a header block. Every
+	// archive-side comparison downstream — the filing ladder's idempotent keep, a
+	// supersede's intent — reads at it, and a stale shorter one would hash a prefix
+	// and fail closed against the archive hash (design header-edits §7).
 	srcSize := lf.size
-	var reSHA, reFrom string
-	if p2, h2, err := w.reapplyRetargetIfNeeded(cfg, tmpPath, diskHash, dataHash, lf.size, prior); err != nil {
-		w.log.Error("rig: re-apply retarget failed; deferring file", "path", lf.path, "error", err)
+	var reSHA string
+	var reEdits model.HeaderEdits
+	if p2, h2, n2, err := w.reapplyEditsIfNeeded(cfg, tmpPath, diskHash, dataHash, lf.size, prior); err != nil {
+		w.log.Error("rig: re-apply of header edits failed; deferring file", "path", lf.path, "error", err)
 		return fileDeferred
 	} else if p2 != tmpPath {
 		// A second temp holds the re-applied edit; its cleanup is ours (transfer's defer
 		// only removes the original streamed temp).
-		srcPath, srcHash = p2, h2
+		srcPath, srcHash, srcSize = p2, h2, n2
 		// The audit record follows the file the edit just produced rather than the one
 		// it produced last time: on an unrevised re-pull the two are the same value,
 		// and on a revision they are not — an audit record that silently stops matching
 		// the file it describes is how the archive-side fallback began.
-		reSHA, reFrom = srcHash, prior.RetargetFrom
+		reSHA, reEdits = srcHash, prior.HeaderEdits
 		defer func() { _ = w.lfs.Remove(srcPath) }()
 	}
 	// sha256 is the DEVICE-side anchor, so it is always the hash of the bytes just
@@ -86,7 +88,7 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 	h, err := w.hdr.ReadHeader(srcPath)
 	if err != nil {
 		w.log.Warn("rig: header read failed; filing unclassified", "path", lf.path, "error", err)
-		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, nil, model.Classification{}, "FITS header could not be read: "+err.Error())
+		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, nil, model.Classification{}, "FITS header could not be read: "+err.Error())
 	}
 	// Extract the embedded WCS once, here, and thread it through every filing path so
 	// a newly-filed frame carries its coordinates immediately (no wait for backfill).
@@ -98,7 +100,7 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 			msg = "unknown IMAGETYP " + strconv.Quote(cls.RawImageType)
 		}
 		w.log.Warn("rig: unknown IMAGETYP; filing unclassified", "path", lf.path, "imagetyp", cls.RawImageType)
-		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, astro, cls, msg)
+		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, astro, cls, msg)
 	}
 
 	var night int
@@ -115,10 +117,10 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 		// The night-derivation inputs are routing-critical for a light; pre-check
 		// them so a missing value never pollutes night_counters with a bogus date.
 		if !cls.TargetPresent {
-			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, astro, cls, "light frame missing OBJECT")
+			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, astro, cls, "light frame missing OBJECT")
 		}
 		if !cls.DateObsPresent {
-			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, astro, cls, "light frame missing DATE-OBS")
+			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, astro, cls, "light frame missing DATE-OBS")
 		}
 		n, err := w.nightFor(ctx, cfg, profile, &cls, opts)
 		var qe *route.QuarantineError
@@ -145,11 +147,11 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 		var qe *route.QuarantineError
 		if errors.As(rerr, &qe) {
 			w.log.Warn("rig: routing quarantine; filing unclassified", "path", lf.path, "reason", qe.Error())
-			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, astro, cls, "routing: "+qe.Error())
+			return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, astro, cls, "routing: "+qe.Error())
 		}
 		// A defensive guard (non-canonical type / missing template): quarantine.
 		w.log.Warn("rig: routing error; filing unclassified", "path", lf.path, "error", rerr)
-		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reFrom, astro, cls, "routing: "+rerr.Error())
+		return w.fileUnclassified(ctx, cfg, profile, lf, prior, srcPath, srcHash, srcSize, sha, dataHash, reSHA, reEdits, astro, cls, "routing: "+rerr.Error())
 	}
 
 	root := cfg.Roots.Light
@@ -160,24 +162,24 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 	name := w.candidateBaseName(lf.name, srcHash)
 	nowUnix := w.now().Unix()
 	return w.fileFrom(ctx, fileArgs{
-		lf:             lf,
-		prior:          prior,
-		cls:            cls,
-		astro:          astro,
-		night:          night,
-		srcPath:        srcPath,
-		diskHash:       srcHash,
-		sha256:         sha,
-		dataSHA256:     dataHash,
-		retargetSHA256: reSHA,
-		retargetFrom:   reFrom,
-		archiveSHA256:  srcHash,
-		archiveSize:    srcSize,
-		destDir:        destDir,
-		canonicalName:  name,
-		state:          model.StateVerified,
-		pulledAtNew:    nowUnix,
-		pulledAtKeep:   priorPulledAt(prior, nowUnix),
+		lf:            lf,
+		prior:         prior,
+		cls:           cls,
+		astro:         astro,
+		night:         night,
+		srcPath:       srcPath,
+		diskHash:      srcHash,
+		sha256:        sha,
+		dataSHA256:    dataHash,
+		editSHA256:    reSHA,
+		headerEdits:   reEdits,
+		archiveSHA256: srcHash,
+		archiveSize:   srcSize,
+		destDir:       destDir,
+		canonicalName: name,
+		state:         model.StateVerified,
+		pulledAtNew:   nowUnix,
+		pulledAtKeep:  priorPulledAt(prior, nowUnix),
 	})
 }
 
@@ -187,7 +189,7 @@ func (w *Worker) classifyAndFile(ctx context.Context, cfg *model.Config, profile
 // its device original as the authoritative copy while its NAS copy is present; only
 // once the operator culls that NAS copy does it become deletion-eligible via the
 // cull drain (DeletionEligible's unclassified-AND-missing branch).
-func (w *Worker) fileUnclassified(ctx context.Context, cfg *model.Config, profile *model.RigProfile, lf listedFrame, prior *model.Frame, tmpPath, diskHash string, archiveSize int64, sha, dataSHA256, retargetSHA256, retargetFrom string, astro *model.Astrometry, cls model.Classification, reason string) fileOutcome {
+func (w *Worker) fileUnclassified(ctx context.Context, cfg *model.Config, profile *model.RigProfile, lf listedFrame, prior *model.Frame, tmpPath, diskHash string, archiveSize int64, sha, dataSHA256, editSHA256 string, headerEdits model.HeaderEdits, astro *model.Astrometry, cls model.Classification, reason string) fileOutcome {
 	destDir := joinLocal(cfg.Roots.Light, "unclassified/"+sanitize.Component(w.profileID))
 	name := w.candidateBaseName(lf.name, diskHash)
 	nowUnix := w.now().Unix()
@@ -200,13 +202,13 @@ func (w *Worker) fileUnclassified(ctx context.Context, cfg *model.Config, profil
 		srcPath:  tmpPath,
 		diskHash: diskHash,
 		// sha256/overlay carry the same anchors the classified path would use: sha is the
-		// device copy just proven, and a re-applied retargeted frame that then fails to
+		// device copy just proven, and a re-applied edited frame that then fails to
 		// classify/route keeps its overlay, never anchoring sha256 to the edited archive
 		// hash (F4).
-		sha256:         sha,
-		dataSHA256:     dataSHA256,
-		retargetSHA256: retargetSHA256,
-		retargetFrom:   retargetFrom,
+		sha256:      sha,
+		dataSHA256:  dataSHA256,
+		editSHA256:  editSHA256,
+		headerEdits: headerEdits,
 		// diskHash IS the archive-side hash here, as it is on every filing site; the
 		// column is written from an explicit field so a later writer that files
 		// something other than what it verified cannot bind the wrong one silently.
@@ -245,7 +247,7 @@ type fileArgs struct {
 	// hashes to as last proven. On a path with an incoming device file it is that file's
 	// hash — diskHash — whether or not an overlay was re-applied on top of it, since the
 	// device holds what was just pulled and nothing else. On a local-rename path
-	// (retarget, reclassify) it is the device anchor carried through from the row, those
+	// (edit, reclassify) it is the device anchor carried through from the row, those
 	// paths never touching the device copy, and there diskHash is the edited archive
 	// hash instead. Omitting it writes '' → drops the frame from DeletionEligible, so
 	// every filing site sets it.
@@ -254,20 +256,20 @@ type fileArgs struct {
 	// FITS data unit, teed off the at-rest verify that proved the staging temp. It is
 	// leg 1 of the three-way agreement a supersede needs and the value the row
 	// records for leg 2 of the next one. A site with no incoming device file (a
-	// reclassify, a retarget) leaves it empty, which UpsertFrame preserves against
+	// reclassify, an edit) leaves it empty, which UpsertFrame preserves against
 	// and which every identity test refuses (design frame-lifecycle §11.3).
 	dataSHA256 string
-	// retargetSHA256/retargetFrom are the retarget overlay (design routing-and-filing
-	// §9.2), written straight into the columns from explicit inputs (never a sticky
-	// CASE): a retarget/re-apply passes the real values; a genuinely-new-content pull
-	// passes empty (→ NULL), resetting the overlay when the archive is replaced by new
-	// content.
-	retargetSHA256 string
-	retargetFrom   string
+	// editSHA256/headerEdits are the edit overlay (design routing-and-filing
+	// §9.2, design header-edits §5.1), written straight into the edit_sha256 and
+	// header_edits columns from explicit inputs (never a sticky CASE): an edit/
+	// re-apply passes the real values; a genuinely-new-content pull passes empty
+	// (→ NULL), resetting the overlay when the archive is replaced by new content.
+	editSHA256  string
+	headerEdits model.HeaderEdits
 	// archiveSHA256/archiveSize are the archive-side anchors written to the
 	// archive_sha256 and archive_size columns: what the file this call is filing must
 	// hash to, and the length it was verified at. They describe srcPath — the edited
-	// bytes on a retarget, the pulled bytes otherwise — which is not always what the
+	// bytes on an edit, the pulled bytes otherwise — which is not always what the
 	// device holds, so they are passed explicitly by every site rather than derived
 	// from the device anchors. An unset pair turns a perfectly good archive copy into
 	// a critical delete_mismatch, which is why nothing bridges a missing one
@@ -278,7 +280,7 @@ type fileArgs struct {
 	canonicalName string
 	state         model.FrameState
 	// deletedAt carries the row's deleted_at through a re-file so it is preserved. A
-	// normal filing site passes 0 (not deleted); retargeting a deleted frame passes the
+	// normal filing site passes 0 (not deleted); editing a deleted frame passes the
 	// existing deleted_at so the relabel does not resurrect the row (it would otherwise
 	// write NULL, and the frame would never prune / lose its reclaim clock).
 	deletedAt    int64
@@ -406,25 +408,25 @@ func (w *Worker) recordFiled(ctx context.Context, a fileArgs, destPath string, p
 		SourceShare: a.lf.share,
 		SourcePath:  a.lf.path,
 		// SHA256 is the device-side anchor (== diskHash for a normal file); the archive
-		// anchors and the retarget overlay carry the edited archive hash separately (design
+		// anchors and the edit overlay carry the edited archive hash separately (design
 		// routing-and-filing §9.2/§9.3).
-		SHA256:         a.sha256,
-		DataSHA256:     a.dataSHA256,
-		RetargetSHA256: a.retargetSHA256,
-		RetargetFrom:   a.retargetFrom,
-		ArchiveSHA256:  a.archiveSHA256,
-		ArchiveSize:    a.archiveSize,
-		Size:           a.lf.size,
-		Mtime:          a.lf.mtime.Unix(),
-		FrameType:      string(a.cls.Type),
-		Target:         a.cls.Target,
-		Night:          int64(a.night),
-		DestPath:       destPath,
-		Sidecars:       a.lf.sidecars,
-		State:          a.state,
-		DeletedAt:      a.deletedAt,
-		PulledAt:       pulledAt,
-		Astrometry:     a.astro,
+		SHA256:        a.sha256,
+		DataSHA256:    a.dataSHA256,
+		EditSHA256:    a.editSHA256,
+		HeaderEdits:   a.headerEdits,
+		ArchiveSHA256: a.archiveSHA256,
+		ArchiveSize:   a.archiveSize,
+		Size:          a.lf.size,
+		Mtime:         a.lf.mtime.Unix(),
+		FrameType:     string(a.cls.Type),
+		Target:        a.cls.Target,
+		Night:         int64(a.night),
+		DestPath:      destPath,
+		Sidecars:      a.lf.sidecars,
+		State:         a.state,
+		DeletedAt:     a.deletedAt,
+		PulledAt:      pulledAt,
+		Astrometry:    a.astro,
 	}
 	// The pane coordinates come from the RAW target — the same string written to
 	// frames.target and the same input the store's backfill parses — not the
@@ -769,7 +771,7 @@ func (w *Worker) reclassifyOne(ctx context.Context, cfg *model.Config, profile *
 		night:    night,
 		srcPath:  f.DestPath, // move the existing NAS file
 		diskHash: f.SHA256,   // already proven at rest when first filed
-		sha256:   f.SHA256,   // an unclassified frame is never retargeted: sha256 == diskHash
+		sha256:   f.SHA256,   // an unclassified frame is never edited: sha256 == diskHash
 		// A local rename changes no bytes, so the archive anchors are carried through
 		// rather than re-derived: the file this moves is the one they already describe.
 		archiveSHA256: f.ArchiveSHA256,

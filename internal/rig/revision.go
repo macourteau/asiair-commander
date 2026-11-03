@@ -59,7 +59,7 @@ func (w *Worker) resolveRevision(ctx context.Context, a fileArgs) (out fileOutco
 		// Empty exactly when the re-apply declined, which is the one thing the primitive
 		// cannot see for itself and the one thing that decides whether a retargeted row
 		// may be superseded at all.
-		retargetSHA256: a.retargetSHA256,
+		editSHA256: a.editSHA256,
 	}); err != nil {
 		if errors.Is(err, errSupersedeRefused) {
 			// Nothing was touched — a cross-rig sharer, most of all — so the frame takes
