@@ -1,0 +1,9 @@
+# Overlay for run.sh's isolated mode: publishes no host port, so the stack runs
+# on a host where something else already holds 445 (macOS File Sharing, a NAS's
+# own Samba). The tests then run in a Go container that shares the "samba"
+# container's network namespace, where 127.0.0.1:445 is that container's smbd.
+services:
+  samba:
+    ports: !reset []
+  samba-remote:
+    ports: !reset []

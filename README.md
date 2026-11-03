@@ -119,7 +119,8 @@ Prerequisites are those of a source build, plus Docker for the integration tests
 
 ```sh
 make check            # the same checks as CI's required build-test job
-make integration      # real-SMB and real-tunnel tests against a Samba container (needs Docker)
+make integration      # real-SMB and real-tunnel tests against a Samba container (needs Docker;
+                      # runs inside the container network when host port 445 is taken)
 make dev              # how to run the backend and the Vite dev server side by side
 make screenshots      # regenerate the README screenshots from a live demo run
 make demo-up SEED=seeddemo   # a background server for a UI pass; make demo-down stops it
