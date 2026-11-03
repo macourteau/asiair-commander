@@ -62,7 +62,8 @@ type Store interface {
 	GetFrame(ctx context.Context, rigID, share, path string) (*model.Frame, bool, error)
 	GetFrameByID(ctx context.Context, id int64) (*model.Frame, bool, error)
 	ListFrames(ctx context.Context, rigID, state, filter string, page, pageSize int) (frames []model.Frame, total int, err error)
-	ListTransferHistory(ctx context.Context, rigID string, from, to int64, page, pageSize int) (frames []model.Frame, total int, err error)
+	ListTransferHistory(ctx context.Context, f HistoryFilter, page, pageSize int) (frames []model.Frame, total int, err error)
+	TransferHistoryFacets(ctx context.Context) (HistoryFacets, error)
 	ListNeverDeletable(ctx context.Context, rigID string, page, pageSize int) (frames []model.Frame, total int, err error)
 	RecentFrames(ctx context.Context, rigID string, limit int) ([]model.Frame, error)
 	DeletionEligible(ctx context.Context, rigID string, graceCutoff int64) ([]model.Frame, error)
@@ -1476,25 +1477,18 @@ func (s *sqlStore) ListFrames(ctx context.Context, rigID, state, filter string, 
 }
 
 // ListTransferHistory returns a page of the combined transfer history: frames
-// that were actually pulled to the NAS (pulled_at set), newest first, optionally
-// scoped to one rig and/or a pulled_at time window. rigID "" spans every rig;
-// from/to are inclusive unix-second bounds on pulled_at (0 = unbounded on that
-// side). It returns the page plus the unpaginated total. Unlike ListFrames (id
-// ASC), this orders by id DESC so the latest transfer leads the history view.
-func (s *sqlStore) ListTransferHistory(ctx context.Context, rigID string, from, to int64, page, pageSize int) ([]model.Frame, int, error) {
+// that were actually pulled to the NAS (pulled_at set), newest first, narrowed by
+// f (history_filter.go). It returns the page plus the unpaginated total. Unlike
+// ListFrames (id ASC), this orders by id DESC so the latest transfer leads the
+// history view.
+func (s *sqlStore) ListTransferHistory(ctx context.Context, f HistoryFilter, page, pageSize int) ([]model.Frame, int, error) {
 	// pulled_at IS NOT NULL is the "actually copied to the NAS" predicate: the 0
 	// sentinel stores as NULL, so this excludes never-pulled (failed/held) frames.
-	where := []string{"pulled_at IS NOT NULL"}
-	var args []any
-	if from > 0 {
-		where = append(where, "pulled_at >= ?")
-		args = append(args, from)
+	if err := f.Validate(); err != nil {
+		return nil, 0, fmt.Errorf("transfer history filter: %w", err)
 	}
-	if to > 0 {
-		where = append(where, "pulled_at <= ?")
-		args = append(args, to)
-	}
-	return s.historyPage(ctx, rigID, where, args, page, pageSize)
+	where, args := f.where()
+	return s.historyPage(ctx, "", append([]string{"pulled_at IS NOT NULL"}, where...), args, page, pageSize)
 }
 
 // neverDeletableWhere selects the frames that are never removed from the device:

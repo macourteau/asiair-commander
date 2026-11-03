@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -955,6 +956,79 @@ func TestTransferHistory(t *testing.T) {
 		t.Errorf("unknown view: want 400, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+// TestTransferHistoryFilterParams covers the Find frames filter parameters end
+// to end: each parses into the store filter it names, a malformed one is a 400,
+// and the facets route lists the history's distinct values.
+func TestTransferHistoryFilterParams(t *testing.T) {
+	h := newHarness(t, true)
+	seed := []*model.Frame{
+		{RigID: "rig-1", SourcePath: "Autorun/a.fit", FrameType: "LIGHT", Target: "NGC 1499", Filter: "L", Exptime: 600, DateObs: "2026-11-02T03:00:00Z", DestPath: "NGC 1499/rig-1/a.fit"},
+		{RigID: "rig-2", SourcePath: "Autorun/b.fit", FrameType: "LIGHT", Target: "NGC 1499", Exptime: 300, DateObs: "2026-11-03T03:00:00Z", DestPath: "NGC 1499/rig-2/b.fit"},
+		{RigID: "rig-2", SourcePath: "Autorun/c.fit", FrameType: "FLAT", Filter: "Ha", Exptime: 1, DateObs: "2026-11-03T04:00:00Z", DestPath: "Flats/c.fit"},
+	}
+	for i, f := range seed {
+		f.SourceShare, f.Size, f.Mtime, f.State, f.PulledAt = "EMMC Images", 1, 1, model.StateVerified, int64(1000+i)
+		if err := h.store.UpsertFrame(context.Background(), f); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+	h.login()
+
+	type page struct {
+		Frames []frameDTO `json:"frames"`
+		Total  int        `json:"total"`
+	}
+	nov3 := strconv.FormatInt(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC).Unix(), 10)
+	cases := []struct {
+		query string
+		want  []string
+	}{
+		{"rig=rig-1&rig=rig-2&rig_not=1", nil},
+		{"rig=rig-2&target=ngc", []string{"Autorun/b.fit"}},
+		{"path=flats", []string{"Autorun/c.fit"}},
+		{"filter=L&filter_none=1", []string{"Autorun/a.fit", "Autorun/b.fit"}},
+		{"filter=Ha&filter_not=1", []string{"Autorun/a.fit", "Autorun/b.fit"}},
+		{"type=FLAT&type_not=1", []string{"Autorun/a.fit", "Autorun/b.fit"}},
+		{"obs_from=" + nov3, []string{"Autorun/b.fit", "Autorun/c.fit"}},
+		{"obs_to=" + nov3 + "&obs_not=1", []string{"Autorun/b.fit", "Autorun/c.fit"}},
+		{"exp_op=in&exp_min=1&exp_max=300", []string{"Autorun/b.fit", "Autorun/c.fit"}},
+		{"exp_op=gt&exp_min=300", []string{"Autorun/a.fit"}},
+	}
+	for _, tc := range cases {
+		var got page
+		decode(t, h.do("GET", "/api/frames?"+tc.query, nil, reqOpts{}), &got)
+		var names []string
+		for _, f := range got.Frames {
+			names = append(names, f.SourcePath)
+		}
+		slices.Sort(names)
+		if !slices.Equal(names, tc.want) || got.Total != len(tc.want) {
+			t.Errorf("?%s = %v (total %d), want %v", tc.query, names, got.Total, tc.want)
+		}
+	}
+
+	for _, q := range []string{
+		"obs_from=yesterday",
+		"obs_from=200&obs_to=100",
+		"exp_op=eq&exp_min=1",
+		"exp_op=lt&exp_min=abc",
+		"exp_op=lt&exp_min=NaN",
+		"exp_op=in&exp_min=10&exp_max=5",
+	} {
+		resp := h.do("GET", "/api/frames?"+q, nil, reqOpts{})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("?%s: want 400, got %d", q, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	var fc store.HistoryFacets
+	decode(t, h.do("GET", "/api/frames/facets", nil, reqOpts{}), &fc)
+	if !slices.Equal(fc.Filters, []string{"Ha", "L"}) || !slices.Equal(fc.FrameTypes, []string{"FLAT", "LIGHT"}) {
+		t.Errorf("facets = %+v, want filters [Ha L], types [FLAT LIGHT]", fc)
+	}
 }
 
 func TestAlertsAck(t *testing.T) {

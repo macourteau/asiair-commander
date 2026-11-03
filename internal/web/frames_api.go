@@ -2,8 +2,11 @@ package web
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/macourteau/asiair-commander/internal/model"
 	"github.com/macourteau/asiair-commander/internal/store"
@@ -211,16 +214,15 @@ func (s *Server) handleRecentFrames(w http.ResponseWriter, r *http.Request, id s
 const historyViewNeverDeletable = "never_deletable"
 
 // handleTransferHistory serves the combined, non-rig-scoped transfer history: every
-// frame actually pulled to the NAS, newest-first, paginated and filterable by rig
-// and/or a pulled_at window (design architecture §8: bulk history always comes
-// from paginated REST). ?view=never_deletable lists the frames behind the backlog
-// alert instead (design architecture §10). page is 1-indexed in the API and 0-indexed in the store;
-// page_size defaults to framesPageSize and is clamped to historyMaxPageSize.
+// frame actually pulled to the NAS, newest-first, paginated and narrowed by the
+// filters parseHistoryFilter reads (design architecture §8: bulk history always
+// comes from paginated REST; the filters are design header-edits §9.4).
+// ?view=never_deletable lists the frames behind the backlog alert instead (design
+// architecture §10), scoped by rig only. page is 1-indexed in the API and
+// 0-indexed in the store; page_size defaults to framesPageSize and is clamped to
+// historyMaxPageSize.
 func (s *Server) handleTransferHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	rig := q.Get("rig")
-	from := int64(atoiDefault(q.Get("from"), 0))
-	to := int64(atoiDefault(q.Get("to"), 0))
 	page := atoiDefault(q.Get("page"), 1)
 	if page < 1 {
 		page = 1
@@ -238,18 +240,23 @@ func (s *Server) handleTransferHistory(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch view := q.Get("view"); view {
 	case "":
-		rows, total, err = s.deps.Store.ListTransferHistory(r.Context(), rig, from, to, page-1, pageSize)
+		f, perr := parseHistoryFilter(q)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, perr.Error())
+			return
+		}
+		rows, total, err = s.deps.Store.ListTransferHistory(r.Context(), f, page-1, pageSize)
 	case historyViewNeverDeletable:
 		// The frames behind the backlog alert, which links here. They are a state,
 		// not a transfer window, so from/to do not apply (a failed frame was never
 		// pulled at all).
-		rows, total, err = s.deps.Store.ListNeverDeletable(r.Context(), rig, page-1, pageSize)
+		rows, total, err = s.deps.Store.ListNeverDeletable(r.Context(), q.Get("rig"), page-1, pageSize)
 	default:
 		writeError(w, http.StatusBadRequest, "unknown history view "+strconv.Quote(view))
 		return
 	}
 	if err != nil {
-		s.log.Error("web: transfer history failed", "rig", rig, "err", err)
+		s.log.Error("web: transfer history failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not list transfer history")
 		return
 	}
@@ -261,6 +268,91 @@ func (s *Server) handleTransferHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"frames": frames, "page": page, "page_size": pageSize, "total": total,
 	})
+}
+
+// parseHistoryFilter reads the transfer history's filter parameters. Lists repeat
+// their parameter (rig=a&rig=b); a *_not=1 flag negates its filter.
+//
+//	rig, rig_not                   device is / is not one of
+//	from, to                       pulled_at window, inclusive unix seconds
+//	target, path                   case-insensitive substring of target / archive path
+//	filter, filter_none, filter_not FILTER is / is not one of (filter_none: no FILTER card)
+//	type, type_not                 frame type is / is not one of
+//	obs_from, obs_to, obs_not      DATE-OBS in / not in [obs_from, obs_to), unix seconds
+//	exp_op, exp_min, exp_max       exposure lt|le|gt|ge exp_min, or in|out [exp_min, exp_max]
+func parseHistoryFilter(q url.Values) (store.HistoryFilter, error) {
+	f := store.HistoryFilter{
+		RigIDs:     nonEmpty(q["rig"]),
+		RigNot:     q.Get("rig_not") == "1",
+		Target:     strings.TrimSpace(q.Get("target")),
+		Path:       strings.TrimSpace(q.Get("path")),
+		Filters:    nonEmpty(q["filter"]),
+		FilterNone: q.Get("filter_none") == "1",
+		FilterNot:  q.Get("filter_not") == "1",
+		FrameTypes: nonEmpty(q["type"]),
+		TypeNot:    q.Get("type_not") == "1",
+		ObsNot:     q.Get("obs_not") == "1",
+	}
+	ints := []struct {
+		name string
+		dst  *int64
+	}{{"from", &f.PulledFrom}, {"to", &f.PulledTo}, {"obs_from", &f.ObsFrom}, {"obs_to", &f.ObsTo}}
+	for _, p := range ints {
+		if v := q.Get(p.name); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return store.HistoryFilter{}, fmt.Errorf("%s must be a whole number of unix seconds", p.name)
+			}
+			*p.dst = n
+		}
+	}
+	if op := q.Get("exp_op"); op != "" {
+		e := &store.ExposureFilter{Op: store.ExposureOp(op)}
+		for _, p := range []struct {
+			name string
+			dst  *float64
+		}{{"exp_min", &e.Min}, {"exp_max", &e.Max}} {
+			v := q.Get(p.name)
+			if v == "" {
+				continue
+			}
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+				return store.HistoryFilter{}, fmt.Errorf("%s must be a number of seconds", p.name)
+			}
+			*p.dst = n
+		}
+		f.Exposure = e
+	}
+	if err := f.Validate(); err != nil {
+		return store.HistoryFilter{}, err
+	}
+	return f, nil
+}
+
+// nonEmpty drops empty values, so an empty ?rig= reads as no filter rather than
+// as a filter on the empty rig id.
+func nonEmpty(vs []string) []string {
+	var out []string
+	for _, v := range vs {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// handleTransferHistoryFacets lists the distinct FILTER and frame-type values in
+// the transfer history, for the Find frames list's value pickers (design
+// header-edits §9.4).
+func (s *Server) handleTransferHistoryFacets(w http.ResponseWriter, r *http.Request) {
+	fc, err := s.deps.Store.TransferHistoryFacets(r.Context())
+	if err != nil {
+		s.log.Error("web: transfer history facets failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not list frame filters")
+		return
+	}
+	writeJSON(w, http.StatusOK, fc)
 }
 
 // summaryGroup is one GROUP BY bucket of the morning summary: frames sharing a
