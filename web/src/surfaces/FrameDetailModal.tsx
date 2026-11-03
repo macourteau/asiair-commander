@@ -21,6 +21,7 @@ import {
 } from "../util/format";
 import { FrameLightbox } from "./FrameLightbox";
 import { stuckFrameHelp } from "../util/stuckFrame";
+import { formatExposure } from "../util/exposure";
 
 export function FrameDetailModal({
   frame,
@@ -87,7 +88,7 @@ export function FrameDetailModal({
           frame.sensor ||
           frame.date_obs) && (
           <Section legend="Recorded metadata">
-            {frame.exptime > 0 && <Row label="Exposure">{frame.exptime}s</Row>}
+            {frame.exptime > 0 && <Row label="Exposure">{formatExposure(frame.exptime)}</Row>}
             {frame.set_temp !== 0 && <Row label="Set temp">{frame.set_temp}&deg;C</Row>}
             {frame.gain > 0 && <Row label="Gain">{frame.gain}</Row>}
             {frame.offset > 0 && <Row label="Offset">{frame.offset}</Row>}
