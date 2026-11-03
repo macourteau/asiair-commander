@@ -8,11 +8,13 @@
  * templates say they belong.
  *
  * The frame list reuses the cross-rig transfer-history read path
- * (api.listTransferHistory) rather than a dedicated list endpoint. That path has
- * no target-substring or date_obs range filter, so the date range and target
- * filters here narrow the loaded page client-side, and the FILTER suggestions
- * come from that same page. Paths shown by Preview are the intended destination;
- * a real name collision at Apply time may disambiguate the filename slightly.
+ * (api.listTransferHistory) rather than a dedicated list endpoint; the filter
+ * bar's filters (design header-edits §9.4) run server-side over the whole
+ * history, and the FILTER suggestions come from the history's facets. The
+ * selection holds the ticked frames themselves, so it survives a filter or page
+ * change and can gather frames no single filter shows together. Paths shown by
+ * Preview are the intended destination; a real name collision at Apply time may
+ * disambiguate the filename slightly.
  *
  * Selection may span rigs (the cross-rig list already mixes them); Preview and
  * Apply each group the selection by rig_id and issue one request per rig, since
@@ -31,6 +33,8 @@ import {
   type EditPreview,
   type EditResult,
   type Frame,
+  type HistoryFacets,
+  type HistoryFilterParams,
   type RefileGroup,
   type RefilePreview,
   type RefileResult,
@@ -55,30 +59,36 @@ import {
   useToast,
   type Column,
 } from "@/design";
+import { FilterBar } from "../components/FilterBar";
 import { basename } from "../util/format";
 import { formatExposure } from "../util/exposure";
 import {
   EDIT_FIELDS,
   EDITABLE_KEYS,
-  filterSuggestions,
   validateEditValue,
 } from "../util/headerEdit";
+import {
+  NO_FILTER,
+  NO_FILTER_LABEL,
+  toParams,
+  type FrameFilter,
+} from "../util/frameFilters";
 import "./surfaces.css";
 import "./tools.css";
 
 const PAGE_SIZE = 200; // the backend's historyMaxPageSize clamp
 
-/** A YYYY-MM-DD date input value → unix millis at day start/end, or undefined when blank. */
-function dayStartMs(value: string): number | undefined {
-  if (!value) return undefined;
-  const t = Date.parse(`${value}T00:00:00`);
-  return Number.isNaN(t) ? undefined : t;
-}
-function dayEndMs(value: string): number | undefined {
-  if (!value) return undefined;
-  const t = Date.parse(`${value}T23:59:59`);
-  return Number.isNaN(t) ? undefined : t;
-}
+/** How long the filter bar settles before a change reloads the list, so typing
+ * in a text filter costs one request rather than one per key. */
+const FILTER_SETTLE_MS = 300;
+
+/** Frame types in the order an imaging session produces them. */
+const TYPE_LABEL: Record<string, string> = {
+  LIGHT: "Light",
+  FLAT: "Flat",
+  DARK: "Dark",
+  BIAS: "Bias",
+};
 
 /** The directory portion of a filed path, for the "current folder" column. */
 function dirname(path: string): string {
@@ -140,12 +150,29 @@ export function Tools() {
     [rigs],
   );
 
+  // ---- filter bar (server-side, over the whole history) --------------------
+  const [filters, setFilters] = useState<FrameFilter[]>([]);
+  const [facets, setFacets] = useState<HistoryFacets>({ filters: [], frame_types: [] });
+  // The request parameters, settled: a key typed into a text filter waits for
+  // the next before reloading. JSON keeps the dependency stable across renders.
+  const paramsKey = JSON.stringify(toParams(filters));
+  const [settledParams, setSettledParams] = useState(paramsKey);
+  useEffect(() => {
+    const t = setTimeout(() => setSettledParams(paramsKey), FILTER_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [paramsKey]);
+
   // ---- frame list (cross-rig, paginated) ----------------------------------
   const [page, setPage] = useState(1);
   const [pageFrames, setPageFrames] = useState<Frame[] | null>(null);
   const [total, setTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // The ticked frames themselves, not ids on the loaded page, so the selection
+  // outlives a filter or page change (see file header).
+  const [selected, setSelected] = useState<Map<number, Frame>>(new Map());
+
+  // A changed filter starts the list over at its first page.
+  useEffect(() => setPage(1), [settledParams]);
 
   const inflight = useRef<AbortController | null>(null);
   const reload = useCallback(() => {
@@ -153,20 +180,28 @@ export function Tools() {
     const ctrl = new AbortController();
     inflight.current = ctrl;
     setLoadError(null);
+    const params = JSON.parse(settledParams) as HistoryFilterParams;
     api
-      .listTransferHistory({ page, page_size: PAGE_SIZE }, ctrl.signal)
+      .listTransferHistory({ ...params, page, page_size: PAGE_SIZE }, ctrl.signal)
       .then((res) => {
         if (ctrl.signal.aborted) return;
         setPageFrames(res.frames);
         setTotal(res.total);
-        setSelected(new Set());
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setLoadError(err instanceof ApiError ? err.message : "Couldn't load frames.");
         setPageFrames([]);
       });
-  }, [page]);
+    // The picker values change only when frames are pulled or edited; refreshing
+    // them with the list keeps them current at the cost of one small query.
+    api
+      .getHistoryFacets(ctrl.signal)
+      .then((fc) => !ctrl.signal.aborted && setFacets(fc))
+      .catch(() => {
+        // Non-fatal: the pickers keep their last values; the list reports errors.
+      });
+  }, [page, settledParams]);
 
   useEffect(() => {
     setPageFrames(null);
@@ -174,49 +209,37 @@ export function Tools() {
     return () => inflight.current?.abort();
   }, [reload]);
 
-  // ---- filter bar (client-side, over the loaded page — see file header) --
-  const [targetFilter, setTargetFilter] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const filterOptions = useMemo(
+    () => ({
+      device: rigs.map((r) => ({ value: r.id, label: r.name || r.id })),
+      filter: [
+        ...facets.filters.map((v) => ({ value: v, label: v })),
+        { value: NO_FILTER, label: NO_FILTER_LABEL },
+      ],
+      type: facets.frame_types.map((v) => ({ value: v, label: TYPE_LABEL[v] ?? v })),
+    }),
+    [rigs, facets],
+  );
 
-  const filtered = useMemo(() => {
-    const frames = pageFrames ?? [];
-    const needle = targetFilter.trim().toLowerCase();
-    const fromMs = dayStartMs(fromDate);
-    const toMs = dayEndMs(toDate);
-    return frames.filter((f) => {
-      if (needle && !(f.target ?? "").toLowerCase().includes(needle)) return false;
-      if (fromMs !== undefined || toMs !== undefined) {
-        const t = f.date_obs ? Date.parse(f.date_obs) : NaN;
-        if (Number.isNaN(t)) return false;
-        if (fromMs !== undefined && t < fromMs) return false;
-        if (toMs !== undefined && t > toMs) return false;
-      }
-      return true;
-    });
-  }, [pageFrames, targetFilter, fromDate, toDate]);
-
-  const toggleOne = (id: number) => {
+  const shown = pageFrames ?? [];
+  const toggleOne = (f: Frame) => {
     setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const next = new Map(prev);
+      if (next.has(f.id)) next.delete(f.id);
+      else next.set(f.id, f);
       return next;
     });
   };
   const selectAll = () =>
-    setSelected((prev) => new Set([...prev, ...filtered.map((f) => f.id)]));
-  const deselectAll = () =>
     setSelected((prev) => {
-      const next = new Set(prev);
-      for (const f of filtered) next.delete(f.id);
+      const next = new Map(prev);
+      for (const f of shown) next.set(f.id, f);
       return next;
     });
+  const deselectAll = () => setSelected(new Map());
 
-  const selectedFrames = useMemo(
-    () => (pageFrames ?? []).filter((f) => selected.has(f.id)),
-    [pageFrames, selected],
-  );
+  const selectedFrames = useMemo(() => [...selected.values()], [selected]);
+  const hiddenSelected = selectedFrames.filter((f) => !shown.some((s) => s.id === f.id)).length;
 
   // ---- field + value input, live-validated per key -------------------------
   const [editKey, setEditKey] = useState<EditableKey>("OBJECT");
@@ -226,7 +249,7 @@ export function Tools() {
   const valueError =
     attempted || newValue.length > 0 ? validateEditValue(editKey, newValue) : undefined;
   const canAct = selectedFrames.length > 0 && !validateEditValue(editKey, newValue);
-  const suggestions = useMemo(() => filterSuggestions(pageFrames ?? []), [pageFrames]);
+  const suggestions = facets.filters;
 
   // A value typed for one keyword is rarely meant for the other, so switching
   // starts the input over rather than carrying a target into the filter.
@@ -365,6 +388,9 @@ export function Tools() {
 
     setApplyBusy(false);
     setPreviews(null);
+    // The edit is done: the selected rows' values and paths are stale, and the
+    // natural next step is a fresh selection.
+    setSelected(new Map());
     reload(); // edited frames carry the new value and possibly a new dest_path
 
     let edited = 0;
@@ -393,7 +419,7 @@ export function Tools() {
           type="checkbox"
           className="aac-checkbox"
           checked={selected.has(f.id)}
-          onChange={() => toggleOne(f.id)}
+          onChange={() => toggleOne(f)}
           disabled={applyBusy}
           aria-label={`Select ${f.target || basename(f.source_path)}`}
         />
@@ -444,48 +470,12 @@ export function Tools() {
       <Card pad style={{ marginBottom: "var(--space-5)" }}>
         <h2 className="section-title">Find frames</h2>
         <p className="section-sub">
-          Filters narrow the {PAGE_SIZE.toLocaleString()} transfers loaded on this
-          page; use Previous/Next below to reach older ones.
+          Filters search every transferred frame. Ticked frames stay selected when
+          you change the filters or the page, so one edit can gather several
+          searches.
         </p>
 
-        <div className="toolbar">
-          <label className="text-sm text-muted" htmlFor="tools-target-filter">
-            Target contains
-          </label>
-          <input
-            id="tools-target-filter"
-            className="aac-input"
-            style={{ maxWidth: 220 }}
-            value={targetFilter}
-            onChange={(e) => setTargetFilter(e.target.value)}
-            placeholder="e.g. Moon"
-          />
-
-          <label className="text-sm text-muted" htmlFor="tools-from">
-            From
-          </label>
-          <input
-            id="tools-from"
-            type="date"
-            className="aac-input"
-            style={{ maxWidth: 170 }}
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={(e) => setFromDate(e.target.value)}
-          />
-          <label className="text-sm text-muted" htmlFor="tools-to">
-            To
-          </label>
-          <input
-            id="tools-to"
-            type="date"
-            className="aac-input"
-            style={{ maxWidth: 170 }}
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={(e) => setToDate(e.target.value)}
-          />
-        </div>
+        <FilterBar filters={filters} onChange={setFilters} options={filterOptions} />
 
         {loadError ? (
           <p className="notice tone-problem" role="alert">
@@ -500,14 +490,16 @@ export function Tools() {
           <>
             <div className="cluster-between" style={{ marginBottom: "var(--space-3)" }}>
               <span className="text-sm text-muted" aria-live="polite">
-                {selected.size} selected of {filtered.length} shown
+                {selected.size} selected
+                {hiddenSelected > 0 && `, ${hiddenSelected} not in this list`} ·{" "}
+                {total.toLocaleString()} {total === 1 ? "frame matches" : "frames match"}
               </span>
               <div className="cluster">
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={selectAll}
-                  disabled={applyBusy || filtered.length === 0}
+                  disabled={applyBusy || shown.length === 0}
                 >
                   Select all
                 </Button>
@@ -525,13 +517,13 @@ export function Tools() {
             <Table
               caption="Frames available for header edits"
               columns={columns}
-              rows={filtered}
+              rows={shown}
               getKey={(f) => f.id}
               empty={
                 <EmptyState
                   icon="nas"
                   title="No frames match these filters"
-                  description="Widen the date range, clear the target filter, or turn the page to see more."
+                  description="Remove or widen a filter to see more."
                 />
               }
             />

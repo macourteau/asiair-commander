@@ -38,6 +38,8 @@ import type {
   DiscoveredRig,
   Frame,
   FramesPage,
+  HistoryFacets,
+  HistoryFilterParams,
   FrameState,
   LibraryStatus,
   LogPull,
@@ -224,10 +226,14 @@ async function errorBody(
   }
 }
 
-function qs(params: Record<string, string | number | boolean | undefined>): string {
+function qs(
+  params: Record<string, string | number | boolean | readonly string[] | undefined>,
+): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== "") sp.set(k, String(v));
+    // A list repeats its parameter (rig=a&rig=b), the form the server reads.
+    if (Array.isArray(v)) for (const item of v) sp.append(k, String(item));
+    else if (v !== undefined && v !== "") sp.set(k, String(v));
   }
   const s = sp.toString();
   return s ? `?${s}` : "";
@@ -579,8 +585,8 @@ export const api = {
    * (unclassified, held or failed, pulled or not); the window does not apply to it.
    */
   listTransferHistory: (
-    params: {
-      rig?: string;
+    params: Omit<HistoryFilterParams, "rig"> & {
+      rig?: string | string[];
       from?: number;
       to?: number;
       page?: number;
@@ -589,6 +595,9 @@ export const api = {
     } = {},
     signal?: AbortSignal,
   ) => request<FramesPage>(`/api/frames${qs(params)}`, { signal }),
+  /** The distinct FILTER and frame-type values across the transfer history. */
+  getHistoryFacets: (signal?: AbortSignal) =>
+    request<HistoryFacets>("/api/frames/facets", { signal }),
   getSummary: (id: string, night?: number, signal?: AbortSignal) =>
     request<RigSummary>(`${rigPath(id)}/summary${qs({ night })}`, { signal }),
   /** A frame's native pixel dimensions, for the lightbox zoom srcSet. */

@@ -9,7 +9,7 @@
  * most 60 characters. FILTER is stored verbatim, so its character set is checked
  * here too: printable ASCII (0x20–0x7E), the FITS string character set.
  */
-import type { EditableKey, Frame } from "@/api";
+import type { EditableKey } from "@/api";
 
 /** Both keys share the FITS card's value budget (design header-edits §3). */
 export const MAX_EDIT_VALUE_LEN = 60;
@@ -78,18 +78,4 @@ export function validateEditValue(key: EditableKey, raw: string): string | undef
     return `Filter names must be ${MAX_EDIT_VALUE_LEN} characters or fewer (currently ${v.length}).`;
   }
   return undefined;
-}
-
-/**
- * The distinct filters in the loaded frame list, sorted, for the FILTER input's
- * suggestions. Spellings that differ only in case are both kept: whether they are
- * one filter is the stacking software's decision, and the operator picking one is
- * the point (design header-edits §9.1).
- */
-export function filterSuggestions(frames: Pick<Frame, "filter">[]): string[] {
-  const seen = new Set<string>();
-  for (const f of frames) {
-    if (f.filter && f.filter.trim()) seen.add(f.filter);
-  }
-  return [...seen].sort((a, b) => a.localeCompare(b));
 }
