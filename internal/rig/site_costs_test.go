@@ -63,7 +63,7 @@ func TestAdmissionPolicyPerRemoteSlotCallers(t *testing.T) {
 	n := requestsSince("pull", 0, remote)
 
 	// Retarget is NAS-only: the local path, whatever the rig's site.
-	if res, err := h.w.serviceRetarget(ctx, a.ID, "M42"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, a.ID, "OBJECT", "M42"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q reason=%q err=%v", res.Status, res.Reason, err)
 	}
 	n = requestsSince("retarget", n, Requester{Rig: "rig-01", Site: netsite.Local})

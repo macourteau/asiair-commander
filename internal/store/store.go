@@ -209,6 +209,7 @@ type Store interface {
 	NightsUnder(ctx context.Context, lo, hi string) ([]int, error)
 	NightFolderCounts(ctx context.Context, lo, hi, dateLo, dateHi string) (total, matching int, err error)
 	DistinctTargetsUnder(ctx context.Context, lo, hi string) ([]string, error)
+	DistinctFilters(ctx context.Context, rigID string) ([]string, error)
 	RebuildNightCounters(ctx context.Context, entries []NightEntry) error
 
 	// Alerts (design architecture §10).
@@ -309,6 +310,7 @@ var migrations = []migration{
 	{version: 9, up: migrate9},
 	{version: 10, up: migrate10},
 	{version: 11, up: migrate11},
+	{version: 12, up: migrate12},
 }
 
 // migrate1 creates the initial schema exactly as the design architecture §7 DDL
@@ -601,6 +603,48 @@ func migrate11(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+// migrate12 generalises the retarget overlay into the edit overlay (design
+// header-edits §5.2): the archive copy can carry edits of several keywords, so the
+// one-keyword record becomes header_edits, a JSON array of {key, value, from} in
+// first-edit order.
+//
+// A retargeted row's overlay is carried across as its OBJECT entry, the value being
+// the target the row already holds (retargeting wrote it from the edited header) and
+// from the old retarget_from, null where none was recorded. A row with a
+// retarget_from but no retarget_sha256 carries no overlay to migrate (its archive
+// is not an edit), so its retarget_from is dropped with the column. retarget_sha256 keeps
+// its meaning under its new name on both tables, so archive-side checks read the
+// same value before and after.
+//
+// supersede_intents.kind defaults to 'revision' so an intent left open across the
+// upgrade recovers as the device revision it is; header_edits and filter are
+// written only by an edit-kind intent.
+//
+// The backfill runs before the DROP because it reads retarget_from. No index names
+// a renamed or dropped column (idx_frames_dest_path is on dest_path alone), which
+// SQLite's DROP COLUMN would otherwise refuse.
+func migrate12(ctx context.Context, tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE frames ADD COLUMN header_edits TEXT`,
+		`UPDATE frames SET header_edits = json_array(json_object(
+			'key', 'OBJECT',
+			'value', COALESCE(target, ''),
+			'from', CASE WHEN retarget_from IS NULL OR retarget_from = '' THEN NULL ELSE retarget_from END))
+		 WHERE retarget_sha256 IS NOT NULL AND retarget_sha256 <> ''`,
+		`ALTER TABLE frames RENAME COLUMN retarget_sha256 TO edit_sha256`,
+		`ALTER TABLE frames DROP COLUMN retarget_from`,
+		`ALTER TABLE supersede_intents RENAME COLUMN retarget_sha256 TO edit_sha256`,
+		`ALTER TABLE supersede_intents ADD COLUMN kind TEXT NOT NULL DEFAULT 'revision'`,
+		`ALTER TABLE supersede_intents ADD COLUMN header_edits TEXT`,
+		`ALTER TABLE supersede_intents ADD COLUMN filter TEXT`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // migrate reads (or initializes) meta.schema_version and runs ordered forward
 // migrations. It refuses to run if the stored version is newer than this binary
 // understands.
@@ -733,8 +777,8 @@ const frameColumns = `id, rig_id, source_share, source_path, sha256, size, mtime
 	frame_type, target, filter, exptime, set_temp, gain, "offset", binning, sensor,
 	date_obs, night, dest_path, sidecars, state, attempts, next_retry_at, pulled_at,
 	deleted_at, error, wcs_status, astrometry, missing_seen_at, restore_requested_at,
-	missing_acked_at, retarget_sha256, retarget_from, panel_base, panel_row, panel_col,
-	data_sha256, archive_sha256, archive_size, delete_defer_count`
+	missing_acked_at, edit_sha256, panel_base, panel_row, panel_col,
+	data_sha256, archive_sha256, archive_size, delete_defer_count, header_edits`
 
 // scanFrame reads one frames row (in frameColumns order) into a model.Frame,
 // unmarshalling sidecars and mapping NULLs back to the 0 sentinels.
@@ -743,7 +787,7 @@ func scanFrame(sc interface{ Scan(...any) error }) (model.Frame, error) {
 	var (
 		sha256, frameType, target, filter, binning, sensor, dateObs, destPath, sidecars, errStr sql.NullString
 		wcsStatus, astrometry                                                                   sql.NullString
-		retargetSHA256, retargetFrom, panelBase                                                 sql.NullString
+		editSHA256, headerEdits, panelBase                                                      sql.NullString
 		dataSHA256, archiveSHA256                                                               sql.NullString
 		exptime, setTemp                                                                        sql.NullFloat64
 		gain, offset, night, nextRetryAt, pulledAt, deletedAt                                   sql.NullInt64
@@ -751,7 +795,7 @@ func scanFrame(sc interface{ Scan(...any) error }) (model.Frame, error) {
 		panelRow, panelCol, archiveSize, deleteDeferCount                                       sql.NullInt64
 		state                                                                                   string
 	)
-	// deleteDeferCount is scanned LAST, matching frameColumns' trailing column. The
+	// headerEdits is scanned LAST, matching frameColumns' trailing column. The
 	// column list and these Scan args are positional with nothing enforcing the
 	// match, so both must stay appended in lockstep (design library-reconciliation
 	// §4.1, design routing-and-filing §9.2).
@@ -759,8 +803,8 @@ func scanFrame(sc interface{ Scan(...any) error }) (model.Frame, error) {
 		&frameType, &target, &filter, &exptime, &setTemp, &gain, &offset, &binning, &sensor,
 		&dateObs, &night, &destPath, &sidecars, &state, &f.Attempts, &nextRetryAt, &pulledAt,
 		&deletedAt, &errStr, &wcsStatus, &astrometry, &missingSeenAt, &restoreRequestedAt,
-		&missingAckedAt, &retargetSHA256, &retargetFrom, &panelBase, &panelRow, &panelCol,
-		&dataSHA256, &archiveSHA256, &archiveSize, &deleteDeferCount); err != nil {
+		&missingAckedAt, &editSHA256, &panelBase, &panelRow, &panelCol,
+		&dataSHA256, &archiveSHA256, &archiveSize, &deleteDeferCount, &headerEdits); err != nil {
 		return model.Frame{}, err
 	}
 	// The copy-keyed columns (design frame-lifecycle §11.1): NULL maps to the same
@@ -779,8 +823,12 @@ func scanFrame(sc interface{ Scan(...any) error }) (model.Frame, error) {
 	f.RestoreRequestedAt = intFromNull(restoreRequestedAt)
 	f.MissingAckedAt = intFromNull(missingAckedAt)
 	// NULL and '' both map to "" — the sentinel archiveHash and the re-apply rule test.
-	f.RetargetSHA256 = retargetSHA256.String
-	f.RetargetFrom = retargetFrom.String
+	f.EditSHA256 = editSHA256.String
+	edits, err := unmarshalHeaderEdits(headerEdits)
+	if err != nil {
+		return model.Frame{}, fmt.Errorf("unmarshal header_edits for frame %d: %w", f.ID, err)
+	}
+	f.HeaderEdits = edits
 	f.SHA256 = sha256.String
 	f.FrameType = frameType.String
 	f.Target = target.String
@@ -832,6 +880,35 @@ func astrometryCols(a *model.Astrometry) (status any, blob any, err error) {
 	return a.Status, string(b), nil
 }
 
+// headerEditsCol binds an edit overlay to its header_edits column: nil and empty
+// both bind NULL, the "never edited" encoding, so an overlay reset by a
+// genuinely-new re-file reads back as nil (design header-edits §5.1).
+func headerEditsCol(e model.HeaderEdits) (any, error) {
+	if len(e) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return nil, fmt.Errorf("marshal header_edits: %w", err)
+	}
+	return string(b), nil
+}
+
+// unmarshalHeaderEdits is headerEditsCol's inverse: NULL and ” read as nil.
+func unmarshalHeaderEdits(v sql.NullString) (model.HeaderEdits, error) {
+	if !v.Valid || v.String == "" {
+		return nil, nil
+	}
+	var e model.HeaderEdits
+	if err := json.Unmarshal([]byte(v.String), &e); err != nil {
+		return nil, err
+	}
+	if len(e) == 0 {
+		return nil, nil
+	}
+	return e, nil
+}
+
 // scanFrames drains rows into a slice.
 func scanFrames(rows *sql.Rows) ([]model.Frame, error) {
 	defer rows.Close()
@@ -857,6 +934,10 @@ func (s *sqlStore) UpsertFrame(ctx context.Context, f *model.Frame) error {
 	if err != nil {
 		return err
 	}
+	edits, err := headerEditsCol(f.HeaderEdits)
+	if err != nil {
+		return err
+	}
 	// The two astrometry CASEs make the Tier-1 statuses (solving/solved/failed/
 	// unsolvable) STICKY against a Tier-0 re-extraction: a re-file/reclassify/differ
 	// re-pull carries a non-nil `none` astrometry (recordFiled sets f.Astrometry from
@@ -869,7 +950,7 @@ func (s *sqlStore) UpsertFrame(ctx context.Context, f *model.Frame) error {
 INSERT INTO frames (rig_id, source_share, source_path, sha256, size, mtime,
 	frame_type, target, filter, exptime, set_temp, gain, "offset", binning, sensor,
 	date_obs, night, dest_path, sidecars, state, attempts, next_retry_at, pulled_at,
-	deleted_at, error, wcs_status, astrometry, retarget_sha256, retarget_from,
+	deleted_at, error, wcs_status, astrometry, edit_sha256, header_edits,
 	panel_base, panel_row, panel_col, data_sha256, archive_sha256, archive_size)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(rig_id, source_share, source_path) DO UPDATE SET
@@ -891,12 +972,12 @@ ON CONFLICT(rig_id, source_share, source_path) DO UPDATE SET
 	-- so any out-of-band-deletion mark, restore request, or acknowledgement is stale
 	-- and cleared (missing_acked_at per design library-reconciliation §10.5).
 	missing_seen_at = NULL, restore_requested_at = NULL, missing_acked_at = NULL,
-	-- The retarget overlay follows the plain excluded= pattern (NOT the sticky
+	-- The edit overlay follows the plain excluded= pattern (NOT the sticky
 	-- astrometry CASE, NOT the always-NULL missing_* pattern): a genuinely-new re-file
-	-- binds "" → NULL and RESETS the overlay, while a retarget/re-apply binds the real
-	-- values and SETS it — the reset-vs-set behavior comes for free (design
-	-- routing-and-filing §9.2).
-	retarget_sha256 = excluded.retarget_sha256, retarget_from = excluded.retarget_from,
+	-- binds "" and nil → NULL and RESETS the overlay, while an edit/re-apply binds the
+	-- real values and SETS it — the reset-vs-set behavior comes for free (design
+	-- routing-and-filing §9.2, design header-edits §5.1).
+	edit_sha256 = excluded.edit_sha256, header_edits = excluded.header_edits,
 	-- The pane columns are derived from target, so they follow it on every write:
 	-- a retarget that renames a frame INTO or OUT OF a pane must not leave the old
 	-- coordinates behind (design routing-and-filing §7.4).
@@ -934,7 +1015,7 @@ RETURNING id, wcs_status, astrometry`
 		f.FrameType, f.Target, f.Filter, f.Exptime, setTempArg(f), f.Gain, f.Offset, f.Binning, f.Sensor,
 		f.DateObs, nullInt(f.Night), f.DestPath, string(sidecars), string(f.State), f.Attempts,
 		nullInt(f.NextRetryAt), nullInt(f.PulledAt), nullInt(f.DeletedAt), f.Error, wcsStatus, astro,
-		nullStr(f.RetargetSHA256), nullStr(f.RetargetFrom),
+		nullStr(f.EditSHA256), edits,
 		nullStr(f.PanelBase), nullInt(int64(f.PanelRow)), nullInt(int64(f.PanelCol)),
 		nullStr(f.DataSHA256), nullStr(f.ArchiveSHA256), nullInt(f.ArchiveSize)).
 		Scan(&id, &effStatus, &effAstro); err != nil {
@@ -959,13 +1040,24 @@ RETURNING id, wcs_status, astrometry`
 // UpdateFrame updates a frame by id (full row overwrite of the mutable columns).
 //
 // It writes a SUBSET: every column added after migrate2 — wcs_status, astrometry,
-// the three missing_*, both retarget_*, the three panel_*, data_sha256, both
+// the three missing_*, edit_sha256 and header_edits, the three panel_*, data_sha256, both
 // archive_* and delete_defer_count — is deliberately absent. Its callers
 // (holdFrame, markDeleted) pass a by-value copy of a model.Frame read earlier, so
 // listing a column here is what would let a stale copy clobber a value another
 // writer set in the meantime. Adding the pane columns would CREATE that hazard,
 // not avoid it: they change only when target does, which this path never touches,
 // and the copy-keyed columns get targeted writers for the same reason.
+//
+// target, filter and dest_path ARE listed, and a header edit changes them (design
+// header-edits §8), so a copy read before an edit and written after it would undo
+// the edit's relabel and point the row back at a path the edit removed. No caller
+// can hold such a copy: both callers run on the rig's worker goroutine inside a
+// cycle phase (the delete pass and the restore phase, each reading its rows when
+// it starts) or inside a request serviced at the Run select that reads its own
+// row, while an edit is serviced only at that same select, between cycles, and
+// never from drainCommands. An edit therefore never runs while any pass holds a
+// row, and every copy UpdateFrame writes was read after the last edit of it. A
+// new caller that holds a row across a Run-select iteration must re-read it first.
 func (s *sqlStore) UpdateFrame(ctx context.Context, f *model.Frame) error {
 	sidecars, err := json.Marshal(f.Sidecars)
 	if err != nil {
@@ -1911,13 +2003,19 @@ func (s *sqlStore) OpenIntentPaths(ctx context.Context, rigID string) (map[strin
 // The anchors travel WITH the intent rather than being re-derived at recovery
 // time: recovery runs before any worker or device session exists, so the device
 // copy is out of reach, and Mtime is the DEVICE file's modification time, which
-// cannot be derived from the archive copy left on disk. RetargetSHA256 is the
+// cannot be derived from the archive copy left on disk. EditSHA256 is the
 // audit record the commit advances — the overlay describes the archive file, and
 // the swap rewrote it — carried for the same reason (design frame-lifecycle
 // §11.9).
+//
+// Kind says which commit the swap ends in: a device revision (the default, and
+// what every intent written before kinds existed is) or an operator's header edit,
+// whose commit writes a different column set (design header-edits §8).
 type SupersedeIntent struct {
 	RigID    string
 	DestPath string
+	// Kind selects the commit. "" is read as SupersedeRevision.
+	Kind SupersedeKind
 	// AsidePath is the reserved sibling the existing archive copy is renamed to in
 	// step 1, derived from that copy's own content hash. Recovery reads the swap's
 	// progress off its presence.
@@ -1933,9 +2031,15 @@ type SupersedeIntent struct {
 	// to every row sharing it.
 	ArchiveSHA256 string
 	ArchiveSize   int64
-	// RetargetSHA256 is what the overlay's audit record becomes on a row that
-	// carries one. "" leaves every row's overlay untouched.
-	RetargetSHA256 string
+	// EditSHA256 is what the overlay's audit record becomes. For a revision it is
+	// written only on a row that carries an overlay, and "" leaves every row's
+	// overlay untouched; for an edit it is written on every sharer.
+	EditSHA256 string
+	// HeaderEdits and Filter are the edited overlay and the edited header's
+	// classified filter, written to every sharer by an edit and ignored by a
+	// revision.
+	HeaderEdits model.HeaderEdits
+	Filter      string
 	// State and PulledAt are the revised row's lifecycle columns after the commit:
 	// the state a completed supersede has proven, and the grace anchor restarting
 	// because the device copy has just been read afresh.
@@ -1944,6 +2048,35 @@ type SupersedeIntent struct {
 	// CreatedAt is diagnostic only — intents have no expiry, because an intent that
 	// outlives its swap is exactly what recovery exists to resolve.
 	CreatedAt int64
+}
+
+// SupersedeKind is which commit a supersede ends in (design header-edits §8).
+type SupersedeKind string
+
+const (
+	// SupersedeRevision is a device-side revision: the device copy was read, so
+	// the read row's device anchors and lifecycle columns advance.
+	SupersedeRevision SupersedeKind = "revision"
+	// SupersedeEdit is an operator's header edit of the archive copy: no device
+	// read happened, so only the archive side and the overlay move.
+	SupersedeEdit SupersedeKind = "edit"
+)
+
+// supersedeKind normalises an intent's kind, refusing one no commit exists for.
+func supersedeKind(in SupersedeIntent) (SupersedeKind, error) {
+	switch in.Kind {
+	case "", SupersedeRevision:
+		return SupersedeRevision, nil
+	case SupersedeEdit:
+		// An edit commit sets the overlay on every sharer, so an edit carrying no
+		// overlay would mark rows edited with nothing to re-apply.
+		if in.EditSHA256 == "" || len(in.HeaderEdits) == 0 {
+			return "", fmt.Errorf("supersede intent %s: edit kind without an overlay", in.DestPath)
+		}
+		return SupersedeEdit, nil
+	default:
+		return "", fmt.Errorf("supersede intent %s: unknown kind %q", in.DestPath, in.Kind)
+	}
 }
 
 // PutSupersedeIntent records (or rewrites) the intent for one swap. It upserts on
@@ -1956,19 +2089,34 @@ func (s *sqlStore) PutSupersedeIntent(ctx context.Context, in SupersedeIntent) e
 	if in.AsidePath == "" {
 		return fmt.Errorf("put supersede intent %s: empty aside path", in.DestPath)
 	}
+	kind, err := supersedeKind(in)
+	if err != nil {
+		return fmt.Errorf("put %w", err)
+	}
+	// A revision carries no overlay or filter of its own; storing NULL for both
+	// keeps a revision intent exactly what it was before kinds existed.
+	var edits, filter any
+	if kind == SupersedeEdit {
+		if edits, err = headerEditsCol(in.HeaderEdits); err != nil {
+			return fmt.Errorf("put supersede intent %s: %w", in.DestPath, err)
+		}
+		filter = in.Filter
+	}
 	if _, err := s.write.ExecContext(ctx,
 		`INSERT INTO supersede_intents(rig_id, dest_path, aside_path, frame_id, sha256, size,
-			mtime, archive_sha256, archive_size, retarget_sha256, state, pulled_at, created_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+			mtime, archive_sha256, archive_size, edit_sha256, state, pulled_at, created_at,
+			kind, header_edits, filter)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(rig_id, dest_path) DO UPDATE SET
 			aside_path = excluded.aside_path, frame_id = excluded.frame_id,
 			sha256 = excluded.sha256, size = excluded.size, mtime = excluded.mtime,
 			archive_sha256 = excluded.archive_sha256, archive_size = excluded.archive_size,
-			retarget_sha256 = excluded.retarget_sha256, state = excluded.state,
-			pulled_at = excluded.pulled_at, created_at = excluded.created_at`,
+			edit_sha256 = excluded.edit_sha256, state = excluded.state,
+			pulled_at = excluded.pulled_at, created_at = excluded.created_at,
+			kind = excluded.kind, header_edits = excluded.header_edits, filter = excluded.filter`,
 		in.RigID, in.DestPath, in.AsidePath, in.FrameID, in.SHA256, in.Size, in.Mtime,
-		in.ArchiveSHA256, in.ArchiveSize, in.RetargetSHA256, string(in.State), in.PulledAt,
-		in.CreatedAt); err != nil {
+		in.ArchiveSHA256, in.ArchiveSize, in.EditSHA256, string(in.State), in.PulledAt,
+		in.CreatedAt, string(kind), edits, filter); err != nil {
 		return fmt.Errorf("put supersede intent %s: %w", in.DestPath, err)
 	}
 	return nil
@@ -1990,7 +2138,8 @@ func (s *sqlStore) ClearSupersedeIntent(ctx context.Context, rigID, destPath str
 func (s *sqlStore) ListSupersedeIntents(ctx context.Context) ([]SupersedeIntent, error) {
 	rows, err := s.read.QueryContext(ctx,
 		`SELECT rig_id, dest_path, aside_path, frame_id, sha256, size, mtime,
-			archive_sha256, archive_size, retarget_sha256, state, pulled_at, created_at
+			archive_sha256, archive_size, edit_sha256, state, pulled_at, created_at,
+			kind, header_edits, filter
 		 FROM supersede_intents ORDER BY created_at ASC, rig_id ASC, dest_path ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list supersede intents: %w", err)
@@ -1999,15 +2148,23 @@ func (s *sqlStore) ListSupersedeIntents(ctx context.Context) ([]SupersedeIntent,
 	var out []SupersedeIntent
 	for rows.Next() {
 		var (
-			in    SupersedeIntent
-			state string
+			in                  SupersedeIntent
+			state, kind         string
+			headerEdits, filter sql.NullString
 		)
 		if err := rows.Scan(&in.RigID, &in.DestPath, &in.AsidePath, &in.FrameID, &in.SHA256,
-			&in.Size, &in.Mtime, &in.ArchiveSHA256, &in.ArchiveSize, &in.RetargetSHA256,
-			&state, &in.PulledAt, &in.CreatedAt); err != nil {
+			&in.Size, &in.Mtime, &in.ArchiveSHA256, &in.ArchiveSize, &in.EditSHA256,
+			&state, &in.PulledAt, &in.CreatedAt, &kind, &headerEdits, &filter); err != nil {
 			return nil, fmt.Errorf("scan supersede intent: %w", err)
 		}
 		in.State = model.FrameState(state)
+		in.Kind = SupersedeKind(kind)
+		in.Filter = filter.String
+		edits, err := unmarshalHeaderEdits(headerEdits)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal supersede intent %s header_edits: %w", in.DestPath, err)
+		}
+		in.HeaderEdits = edits
 		out = append(out, in)
 	}
 	return out, rows.Err()
@@ -2055,14 +2212,16 @@ func (s *sqlStore) OpenSupersedePaths(ctx context.Context, rigID string) (map[st
 //
 // data_sha256 is absent from both statements, which is the preserve: the exposure
 // identity is side-independent and fixed for the exposure's life, and the header
-// edit a supersede files is exactly what it survives. retarget_from is untouched
-// for the converse reason — what the frame was labelled before does not change
-// when its bytes do.
+// edit a supersede files is exactly what it survives. header_edits is untouched
+// by a revision for the converse reason — what the frame's cards were before an
+// edit does not change when the device rewrites its header.
 //
-// The overlay advances only on a row that already carries one: retarget_sha256 is
-// an audit record whose non-empty value MEANS the frame was retargeted, so writing
-// it onto a row that never was would assert a re-label nobody made. An empty
-// RetargetSHA256 leaves every row's overlay alone.
+// A revision advances the overlay only on a row that already carries one:
+// edit_sha256 is an audit record whose non-empty value MEANS the archive is an
+// edit, so writing it onto a row that never was would assert an edit nobody made.
+// An empty EditSHA256 leaves every row's overlay alone.
+//
+// An edit-kind intent commits through commitEdit instead (design header-edits §8).
 //
 // The revised row is matched on its dest_path as well as its id, so the commit
 // applies only to a row still naming the path the intent was written against. A row
@@ -2077,19 +2236,83 @@ func (s *sqlStore) OpenSupersedePaths(ctx context.Context, rigID string) (map[st
 // a row mid-swap, a re-file can move one out from under an open intent, and
 // recovery re-runs a commit that may already have landed.
 func (s *sqlStore) CommitSupersede(ctx context.Context, in SupersedeIntent) (bool, int, error) {
+	kind, err := supersedeKind(in)
+	if err != nil {
+		return false, 0, fmt.Errorf("commit %w", err)
+	}
+	if kind == SupersedeEdit {
+		return s.commitEdit(ctx, in)
+	}
 	return s.commitArchiveWrite(ctx, ArchiveWrite{
-		RigID:          in.RigID,
-		DestPath:       in.DestPath,
-		FrameID:        in.FrameID,
-		SHA256:         in.SHA256,
-		Size:           in.Size,
-		Mtime:          in.Mtime,
-		ArchiveSHA256:  in.ArchiveSHA256,
-		ArchiveSize:    in.ArchiveSize,
-		RetargetSHA256: in.RetargetSHA256,
-		State:          in.State,
-		PulledAt:       in.PulledAt,
+		RigID:         in.RigID,
+		DestPath:      in.DestPath,
+		FrameID:       in.FrameID,
+		SHA256:        in.SHA256,
+		Size:          in.Size,
+		Mtime:         in.Mtime,
+		ArchiveSHA256: in.ArchiveSHA256,
+		ArchiveSize:   in.ArchiveSize,
+		EditSHA256:    in.EditSHA256,
+		State:         in.State,
+		PulledAt:      in.PulledAt,
 	})
+}
+
+// commitEdit is step 3 of an in-place header edit (design header-edits §8): the
+// edited file now at DestPath is what every row naming it describes, so every
+// sharer — the edited row included — takes its archive anchors, the overlay and
+// the edited filter, and every one now describes an edited file, so edit_sha256 is
+// set unconditionally rather than advanced only where an overlay already was.
+//
+// The device anchors (sha256, size, mtime), state, pulled_at and
+// delete_defer_count are absent from the SQL, not written back from the intent: no
+// device copy was read, so none has a reason to change, a deleted row stays
+// deleted, and a recovery replaying the intent days later cannot restore stale
+// values captured when it was written.
+//
+// The edited row is matched on dest_path as well as id, for the reason the revision
+// commit is: a row re-filed elsewhere since commits nothing. It reports whether that
+// row was found and how many other sharers moved.
+func (s *sqlStore) commitEdit(ctx context.Context, in SupersedeIntent) (bool, int, error) {
+	if in.DestPath == "" {
+		return false, 0, ErrEmptyDestPath
+	}
+	edits, err := headerEditsCol(in.HeaderEdits)
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit %s: %w", in.DestPath, err)
+	}
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit: %w", err)
+	}
+	defer tx.Rollback()
+
+	const set = `UPDATE frames SET archive_sha256=?, archive_size=?, edit_sha256=?,
+		header_edits=?, filter=? `
+	sharers, err := tx.ExecContext(ctx, set+`WHERE rig_id=? AND dest_path=? AND id<>?`,
+		in.ArchiveSHA256, in.ArchiveSize, in.EditSHA256, edits, in.Filter,
+		in.RigID, in.DestPath, in.FrameID)
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit sharers of %s: %w", in.DestPath, err)
+	}
+	sn, err := sharers.RowsAffected()
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit sharers of %s: %w", in.DestPath, err)
+	}
+	res, err := tx.ExecContext(ctx, set+`WHERE rig_id=? AND id=? AND dest_path=?`,
+		in.ArchiveSHA256, in.ArchiveSize, in.EditSHA256, edits, in.Filter,
+		in.RigID, in.FrameID, in.DestPath)
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit %s: %w", in.DestPath, err)
+	}
+	rn, err := res.RowsAffected()
+	if err != nil {
+		return false, 0, fmt.Errorf("commit edit %s: %w", in.DestPath, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, 0, fmt.Errorf("commit edit %s: %w", in.DestPath, err)
+	}
+	return rn > 0, int(sn), nil
 }
 
 // ArchiveWrite is one write of a shared archive file, as the rows that name it
@@ -2118,9 +2341,9 @@ type ArchiveWrite struct {
 	// sharing it.
 	ArchiveSHA256 string
 	ArchiveSize   int64
-	// RetargetSHA256 is what the overlay's audit record becomes on a row that
+	// EditSHA256 is what the overlay's audit record becomes on a row that
 	// carries one. "" leaves every row's overlay untouched.
-	RetargetSHA256 string
+	EditSHA256 string
 	// State and PulledAt are the read row's lifecycle columns after the write.
 	State    model.FrameState
 	PulledAt int64
@@ -2137,14 +2360,14 @@ func (s *sqlStore) commitArchiveWrite(ctx context.Context, in ArchiveWrite) (boo
 	}
 	defer tx.Rollback()
 
-	const overlay = `retarget_sha256 = CASE
-		WHEN ? <> '' AND retarget_sha256 IS NOT NULL AND retarget_sha256 <> ''
-		THEN ? ELSE retarget_sha256 END`
+	const overlay = `edit_sha256 = CASE
+		WHEN ? <> '' AND edit_sha256 IS NOT NULL AND edit_sha256 <> ''
+		THEN ? ELSE edit_sha256 END`
 
 	sharers, err := tx.ExecContext(ctx,
 		`UPDATE frames SET archive_sha256=?, archive_size=?, `+overlay+`
 		 WHERE rig_id=? AND dest_path=? AND id<>?`,
-		in.ArchiveSHA256, in.ArchiveSize, in.RetargetSHA256, in.RetargetSHA256,
+		in.ArchiveSHA256, in.ArchiveSize, in.EditSHA256, in.EditSHA256,
 		in.RigID, in.DestPath, in.FrameID)
 	if err != nil {
 		return false, 0, fmt.Errorf("commit archive write sharers of %s: %w", in.DestPath, err)
@@ -2159,7 +2382,7 @@ func (s *sqlStore) commitArchiveWrite(ctx context.Context, in ArchiveWrite) (boo
 			state=?, pulled_at=?, delete_defer_count=0, `+overlay+`
 		 WHERE rig_id=? AND id=? AND dest_path=?`,
 		in.SHA256, in.Size, in.Mtime, in.ArchiveSHA256, in.ArchiveSize,
-		string(in.State), in.PulledAt, in.RetargetSHA256, in.RetargetSHA256,
+		string(in.State), in.PulledAt, in.EditSHA256, in.EditSHA256,
 		in.RigID, in.FrameID, in.DestPath)
 	if err != nil {
 		return false, 0, fmt.Errorf("commit archive write %s: %w", in.DestPath, err)
@@ -2535,6 +2758,29 @@ func (s *sqlStore) DistinctTargetsUnder(ctx context.Context, lo, hi string) ([]s
 			return nil, fmt.Errorf("scan target under path: %w", err)
 		}
 		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// DistinctFilters returns the distinct FILTER values recorded on the rig's rows,
+// as written: a header edit's preview compares them to the value being written
+// and reports the ones that differ only in case, which stacking software may
+// group apart (design header-edits §9.1). An absent card is stored as an empty
+// string and is not a value.
+func (s *sqlStore) DistinctFilters(ctx context.Context, rigID string) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx,
+		`SELECT DISTINCT filter FROM frames WHERE rig_id = ? AND filter <> ''`, rigID)
+	if err != nil {
+		return nil, fmt.Errorf("distinct filters: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, fmt.Errorf("scan distinct filter: %w", err)
+		}
+		out = append(out, f)
 	}
 	return out, rows.Err()
 }

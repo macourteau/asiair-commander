@@ -1,39 +1,41 @@
 /**
- * Tools — a page for operator utilities on already-archived frames. The first
- * (and so far only) tool is frame retargeting (design
- * routing-and-filing §9.7): fix a frame whose ASIAIR Autorun target
- * name was wrong at capture time by re-labelling its FITS OBJECT card and
- * re-filing it to the correct target folder.
+ * Tools — a page for operator utilities on already-archived frames. Edit header
+ * (design header-edits §9.3) corrects one FITS keyword on archived frames: the
+ * target (OBJECT) an ASIAIR Autorun recorded wrongly at capture time, which
+ * re-files the frame under the corrected target (design routing-and-filing §9),
+ * or the filter (FILTER), which re-files it only when its folder template names
+ * the filter. Re-file moves correctly labelled frames to where the folder
+ * templates say they belong.
  *
- * The frame list reuses the existing cross-rig transfer-history read path
- * (api.listTransferHistory) rather than a new backend list endpoint — the
- * backend doesn't yet support a target-substring or date_obs range filter
- * server-side (a later wave adds that), so the date range and target filters
- * here narrow the currently-loaded page client-side. Paths shown by Preview are
- * the intended destination; a real name collision at Apply time may disambiguate
- * the filename slightly.
+ * The frame list reuses the cross-rig transfer-history read path
+ * (api.listTransferHistory) rather than a dedicated list endpoint. That path has
+ * no target-substring or date_obs range filter, so the date range and target
+ * filters here narrow the loaded page client-side, and the FILTER suggestions
+ * come from that same page. Paths shown by Preview are the intended destination;
+ * a real name collision at Apply time may disambiguate the filename slightly.
  *
  * Selection may span rigs (the cross-rig list already mixes them); Preview and
  * Apply each group the selection by rig_id and issue one request per rig, since
- * both retarget endpoints are per-rig (`/api/rigs/{id}/retarget/...`).
+ * both edit endpoints are per-rig (`/api/rigs/{id}/edit/...`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   api,
+  applyEdit,
   applyRefile,
-  applyRetarget,
   ApiError,
+  previewEdit,
   previewRefile,
-  previewRetarget,
+  type EditableKey,
+  type EditPreview,
+  type EditResult,
   type Frame,
   type RefileGroup,
   type RefilePreview,
   type RefileResult,
   type RefileScope,
   type RefileStatus,
-  type RetargetPreview,
-  type RetargetResult,
   type RigProfile,
   type StrandRisk,
 } from "@/api";
@@ -49,16 +51,21 @@ import {
   StatusPill,
   Table,
   TextInput,
-  retargetResultView,
+  editResultView,
   useToast,
   type Column,
 } from "@/design";
 import { basename } from "../util/format";
+import {
+  EDIT_FIELDS,
+  EDITABLE_KEYS,
+  filterSuggestions,
+  validateEditValue,
+} from "../util/headerEdit";
 import "./surfaces.css";
 import "./tools.css";
 
 const PAGE_SIZE = 200; // the backend's historyMaxPageSize clamp
-const MAX_TARGET_LEN = 60; // matches the FITS OBJECT card's value budget (design routing-and-filing §9.1)
 
 /** A YYYY-MM-DD date input value → unix millis at day start/end, or undefined when blank. */
 function dayStartMs(value: string): number | undefined {
@@ -79,20 +86,14 @@ function dirname(path: string): string {
   return idx >= 0 ? path.slice(0, idx) : "";
 }
 
-/** Non-empty ⇒ why the typed target can't be used yet. */
-function validateTarget(raw: string): string | undefined {
-  const t = raw.trim();
-  if (!t) return "Enter the corrected target name.";
-  if (t.length > MAX_TARGET_LEN) {
-    return `Target names must be ${MAX_TARGET_LEN} characters or fewer (currently ${t.length}).`;
-  }
-  return undefined;
-}
+/** What a key's value is called in running copy. */
+const KEY_NOUN: Record<EditableKey, string> = { OBJECT: "target", FILTER: "filter" };
 
 /**
- * The spellings already filed in a preview row's destination folder, as one
- * readable phrase. A folder can hold more than a handful, and the point is that
- * there is divergence at all — so three are named and the rest counted.
+ * The spellings a preview row reports (filed in the destination folder for a
+ * target, elsewhere on the rig for a filter), as one readable phrase. There can
+ * be more than a handful, and the point is that there is divergence at all — so
+ * three are named and the rest counted.
  */
 function spellingList(names: string[]): string {
   const shown = names.slice(0, 3).map((n) => `"${n}"`);
@@ -216,33 +217,46 @@ export function Tools() {
     [pageFrames, selected],
   );
 
-  // ---- new-target input, live-validated -----------------------------------
-  const [newTarget, setNewTarget] = useState("");
+  // ---- field + value input, live-validated per key -------------------------
+  const [editKey, setEditKey] = useState<EditableKey>("OBJECT");
+  const [newValue, setNewValue] = useState("");
   const [attempted, setAttempted] = useState(false);
-  const targetError =
-    attempted || newTarget.length > 0 ? validateTarget(newTarget) : undefined;
-  const canAct = selectedFrames.length > 0 && !validateTarget(newTarget);
+  const field = EDIT_FIELDS[editKey];
+  const valueError =
+    attempted || newValue.length > 0 ? validateEditValue(editKey, newValue) : undefined;
+  const canAct = selectedFrames.length > 0 && !validateEditValue(editKey, newValue);
+  const suggestions = useMemo(() => filterSuggestions(pageFrames ?? []), [pageFrames]);
+
+  // A value typed for one keyword is rarely meant for the other, so switching
+  // starts the input over rather than carrying a target into the filter.
+  const changeKey = (key: EditableKey) => {
+    setEditKey(key);
+    setNewValue("");
+    setAttempted(false);
+  };
 
   // ---- preview -------------------------------------------------------------
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [previews, setPreviews] = useState<RetargetPreview[] | null>(null);
+  const [previews, setPreviews] = useState<EditPreview[] | null>(null);
   const [previewFrames, setPreviewFrames] = useState<Frame[]>([]);
-  const [previewTarget, setPreviewTarget] = useState("");
+  const [previewKey, setPreviewKey] = useState<EditableKey>("OBJECT");
+  const [previewValue, setPreviewValue] = useState("");
 
   const runPreview = useCallback(async () => {
     setAttempted(true);
-    if (selectedFrames.length === 0 || validateTarget(newTarget) || previewBusy) {
+    if (selectedFrames.length === 0 || validateEditValue(editKey, newValue) || previewBusy) {
       return;
     }
-    const target = newTarget.trim();
+    const key = editKey;
+    const value = newValue.trim();
     setPreviewBusy(true);
     const entries = Array.from(groupByRig(selectedFrames).entries());
     const settled = await Promise.allSettled(
       entries.map(([rigId, frames]) =>
-        previewRetarget(rigId, frames.map((f) => f.id), target),
+        previewEdit(rigId, frames.map((f) => f.id), key, value),
       ),
     );
-    const merged: RetargetPreview[] = [];
+    const merged: EditPreview[] = [];
     let failures = 0;
     settled.forEach((r, i) => {
       if (r.status === "fulfilled") {
@@ -258,17 +272,18 @@ export function Tools() {
     });
     setPreviews(merged);
     setPreviewFrames(selectedFrames);
-    setPreviewTarget(target);
+    setPreviewKey(key);
+    setPreviewValue(value);
     setPreviewBusy(false);
     if (failures === 0 && merged.length > 0) {
       const ineligible = merged.filter((p) => !p.eligible).length;
       toast.info(
         ineligible > 0
-          ? `${merged.length - ineligible} of ${merged.length} frames can be retargeted; ${ineligible} ineligible.`
-          : `All ${merged.length} frames can be retargeted.`,
+          ? `${merged.length - ineligible} of ${merged.length} frames can be edited; ${ineligible} ineligible.`
+          : `All ${merged.length} frames can be edited.`,
       );
     }
-  }, [newTarget, selectedFrames, previewBusy, toast, rigName]);
+  }, [editKey, newValue, selectedFrames, previewBusy, toast, rigName]);
 
   const previewFrameById = useMemo(() => {
     const m = new Map<number, Frame>();
@@ -276,34 +291,36 @@ export function Tools() {
     return m;
   }, [previewFrames]);
 
-  /** How many of the selected frames Apply would actually retarget, or null when
+  /** How many of the selected frames Apply would actually edit, or null when
    * that is unknown — no preview yet, a preview whose per-rig requests didn't all
-   * answer, or one taken against a different selection or target. The confirmation
-   * states blast radius, so it may only quote a count the preview still covers. */
+   * answer, or one taken against a different selection, keyword or value. The
+   * confirmation states blast radius, so it may only quote a count the preview
+   * still covers. */
   const eligibleCount = useMemo(() => {
-    if (!previews || previewTarget !== newTarget.trim()) return null;
+    if (!previews || previewKey !== editKey || previewValue !== newValue.trim()) return null;
     if (previews.length !== selectedFrames.length) return null;
     const covered = new Set(previews.map((p) => p.frame_id));
     if (!selectedFrames.every((f) => covered.has(f.id))) return null;
     return previews.filter((p) => p.eligible).length;
-  }, [previews, previewTarget, newTarget, selectedFrames]);
+  }, [previews, previewKey, previewValue, editKey, newValue, selectedFrames]);
 
   // Without a covering preview the confirmation quotes the selection as a ceiling
   // ("up to N"), never as a promise, because the skipped share is unknown.
   const confirmCount = eligibleCount ?? selectedFrames.length;
   const confirmSkipped = eligibleCount === null ? 0 : selectedFrames.length - eligibleCount;
+  const noun = KEY_NOUN[editKey];
   const confirmDetail =
     eligibleCount === null
-      ? "Frames already carrying that target, or otherwise ineligible, are skipped — preview to see the exact count."
+      ? `Frames already carrying that ${noun}, or otherwise ineligible, are skipped — preview to see the exact count.`
       : confirmSkipped > 0
-        ? `The other ${confirmSkipped} selected frame${confirmSkipped === 1 ? " is" : "s are"} skipped — already on that target, or otherwise ineligible.`
+        ? `The other ${confirmSkipped} selected frame${confirmSkipped === 1 ? " is" : "s are"} skipped — already on that ${noun}, or otherwise ineligible.`
         : null;
 
   // ---- apply (streamed, per-rig, live progress) ----------------------------
   const [applyConfirmOpen, setApplyConfirmOpen] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyFrames, setApplyFrames] = useState<Frame[]>([]);
-  const [applyResults, setApplyResults] = useState<Map<number, RetargetResult>>(new Map());
+  const [applyResults, setApplyResults] = useState<Map<number, EditResult>>(new Map());
 
   const openApplyConfirm = () => {
     setAttempted(true);
@@ -312,7 +329,8 @@ export function Tools() {
   };
 
   const runApply = useCallback(async () => {
-    const target = newTarget.trim();
+    const key = editKey;
+    const value = newValue.trim();
     const frames = selectedFrames;
     setApplyConfirmOpen(false);
     if (frames.length === 0) return;
@@ -321,11 +339,11 @@ export function Tools() {
     setApplyFrames(frames);
     setApplyResults(new Map());
 
-    const localResults = new Map<number, RetargetResult>();
+    const localResults = new Map<number, EditResult>();
     const entries = Array.from(groupByRig(frames).entries());
     const settled = await Promise.allSettled(
       entries.map(([rigId, rigFrames]) =>
-        applyRetarget(rigId, rigFrames.map((f) => f.id), target, (r) => {
+        applyEdit(rigId, rigFrames.map((f) => f.id), key, value, (r) => {
           localResults.set(r.frame_id, r);
           setApplyResults(new Map(localResults));
         }),
@@ -339,31 +357,31 @@ export function Tools() {
         const rigId = entries[i]![0];
         toast.error(
           r.reason instanceof ApiError ? r.reason.message : "Couldn't reach the server.",
-          `Retarget failed — ${rigName(rigId)}`,
+          `Edit failed — ${rigName(rigId)}`,
         );
       }
     });
 
     setApplyBusy(false);
     setPreviews(null);
-    reload(); // filed frames now carry a new target/dest_path
+    reload(); // edited frames carry the new value and possibly a new dest_path
 
-    let retargeted = 0;
+    let edited = 0;
     let skipped = 0;
     let failed = 0;
     for (const r of localResults.values()) {
-      if (r.status === "retargeted") retargeted++;
+      if (r.status === "edited") edited++;
       else if (r.status === "skipped") skipped++;
       else failed++;
     }
     if (rigFailures === 0) {
       toast.success(
-        `Retargeted ${retargeted} of ${frames.length} to "${target}"` +
+        `Set ${key} to "${value}" on ${edited} of ${frames.length}` +
           (skipped || failed ? ` (${skipped} skipped, ${failed} failed).` : "."),
-        skipped || failed ? undefined : "Retarget complete",
+        skipped || failed ? undefined : "Edit complete",
       );
     }
-  }, [newTarget, selectedFrames, toast, rigName, reload]);
+  }, [editKey, newValue, selectedFrames, toast, rigName, reload]);
 
   const columns: Column<Frame>[] = [
     {
@@ -412,11 +430,12 @@ export function Tools() {
         <div>
           <h1 className="surface-head__title">Tools</h1>
           <p className="surface-head__desc">
-            Utilities for already-archived frames. Retarget re-labels frames captured
-            under the wrong Autorun target — it rewrites the FITS header and refiles
-            the frame. Re-file moves frames that are already labelled correctly to
-            where your current folder templates say they belong. Device originals are
-            never touched by either.
+            Utilities for already-archived frames. Edit header corrects the target or
+            filter recorded in a frame's FITS header — a wrong Autorun target, or a
+            filter name your stacking software groups differently — and refiles the
+            frame when its folder changes. Re-file moves frames that are already
+            labelled correctly to where your folder templates say they belong. Device
+            originals are never touched by either.
           </p>
         </div>
       </header>
@@ -503,7 +522,7 @@ export function Tools() {
             </div>
 
             <Table
-              caption="Frames available for retargeting"
+              caption="Frames available for header edits"
               columns={columns}
               rows={filtered}
               getKey={(f) => f.id}
@@ -544,26 +563,46 @@ export function Tools() {
       </Card>
 
       <Card pad style={{ marginBottom: "var(--space-5)" }}>
-        <h2 className="section-title">Retarget</h2>
+        <h2 className="section-title">Edit header</h2>
         <div className="form-grid" style={{ marginTop: "var(--space-3)" }}>
+          <Field label="Header field" help="The FITS keyword to change on the selected frames.">
+            {(f) => (
+              <Select
+                {...f}
+                value={editKey}
+                disabled={applyBusy}
+                onChange={(e) => changeKey(e.target.value as EditableKey)}
+                options={EDITABLE_KEYS.map((k) => ({ value: k, label: EDIT_FIELDS[k].option }))}
+              />
+            )}
+          </Field>
           <Field
-            label="New target"
-            help={`Replaces the FITS OBJECT header and refiles the frame under this name. Up to ${MAX_TARGET_LEN} characters.`}
-            example="'NGC 7000' → 'NGC7000'"
-            error={targetError}
+            label={field.inputLabel}
+            help={field.help}
+            example={field.example}
+            error={valueError}
             required
           >
             {(f) => (
               <TextInput
                 {...f}
-                value={newTarget}
-                onChange={(e) => setNewTarget(e.target.value)}
-                placeholder="e.g. NGC7000"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder={field.placeholder}
                 disabled={applyBusy}
-                invalid={!!targetError}
+                invalid={!!valueError}
+                list={editKey === "FILTER" ? "tools-filter-suggestions" : undefined}
+                autoComplete="off"
               />
             )}
           </Field>
+          {editKey === "FILTER" && (
+            <datalist id="tools-filter-suggestions">
+              {suggestions.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          )}
         </div>
 
         <div className="cluster" style={{ marginTop: "var(--space-4)" }}>
@@ -594,39 +633,69 @@ export function Tools() {
             Paths shown are the intended destination — Apply may adjust the filename
             slightly if it collides with an existing file.
           </p>
-          <ul className="list-reset retarget-preview">
+          <ul className="list-reset header-edit-preview">
             {previews.map((p) => {
               const f = previewFrameById.get(p.frame_id);
               return (
                 <li
                   key={p.frame_id}
-                  className={`retarget-preview__item${
-                    p.eligible ? "" : " retarget-preview__item--ineligible"
+                  className={`header-edit-preview__item${
+                    p.eligible ? "" : " header-edit-preview__item--ineligible"
                   }`}
                 >
-                  <div className="retarget-preview__head">
+                  <div className="header-edit-preview__head">
                     <span className="text-sm text-muted">
-                      {f ? rigName(f.rig_id) : ""} — {p.current_target || "(no target)"}
+                      {f ? rigName(f.rig_id) : ""} — {previewKey}{" "}
+                      {p.current_present ? (
+                        <span className="mono">"{p.current_value}"</span>
+                      ) : (
+                        "none"
+                      )}
                     </span>
                     {!p.eligible && <StatusPill tone="problem" icon="problem" label="Ineligible" />}
                   </div>
-                  <div className="retarget-preview__paths mono text-sm break-anywhere">
-                    <span>{p.old_path}</span>
-                    <Icon name="chevron-right" size={14} />
-                    <span>{p.new_path}</span>
-                  </div>
+                  {p.in_place ? (
+                    <>
+                      <div className="header-edit-preview__paths mono text-sm break-anywhere">
+                        <span>{p.old_path}</span>
+                      </div>
+                      <p className="text-xs text-muted">
+                        The file keeps its path — only its header changes.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="header-edit-preview__paths mono text-sm break-anywhere">
+                      <span>{p.old_path}</span>
+                      <Icon name="chevron-right" size={14} />
+                      <span>{p.new_path}</span>
+                    </div>
+                  )}
                   {p.night_approx && (
                     <p className="text-xs text-muted">
                       Night number may change — another frame filed before you apply can
                       shift it.
                     </p>
                   )}
-                  {p.existing_spellings && p.existing_spellings.length > 0 && (
-                    <p className="text-xs text-muted">
-                      Already filed here as {spellingList(p.existing_spellings)} — applying
-                      will leave two spellings of this target in one folder.
-                    </p>
-                  )}
+                  {p.existing_spellings &&
+                    p.existing_spellings.length > 0 &&
+                    (previewKey === "OBJECT" ? (
+                      <p className="text-xs text-muted">
+                        Already filed here as {spellingList(p.existing_spellings)} — applying
+                        will leave two spellings of this target in one folder.
+                      </p>
+                    ) : (
+                      // Case is not folded for a filter (design header-edits §9.1), so a
+                      // spelling that differs only in case is a likely typo worth flagging
+                      // before Apply, not a refusal.
+                      <p className="notice tone-working header-edit-preview__warning">
+                        <Icon name="alert" size={16} />
+                        <span>
+                          This device already has {spellingList(p.existing_spellings)}, which
+                          differs from "{previewValue}" only in case. Stacking software may
+                          treat them as separate filters.
+                        </span>
+                      </p>
+                    ))}
                   {p.reason &&
                     (p.eligible ? (
                       // An eligible row's reason is informational — a read the preview
@@ -649,20 +718,20 @@ export function Tools() {
           <h2 className="section-title">Apply progress</h2>
           <p className="section-sub" aria-live="polite">
             {applyBusy
-              ? `Retargeting ${applyResults.size} of ${applyFrames.length}…`
+              ? `Editing ${applyResults.size} of ${applyFrames.length}…`
               : `Done — ${applyFrames.length} frame${applyFrames.length === 1 ? "" : "s"} processed.`}
           </p>
-          <ul className="list-reset retarget-progress">
+          <ul className="list-reset header-edit-progress">
             {applyFrames.map((f) => {
               const r = applyResults.get(f.id);
               return (
-                <li key={f.id} className="retarget-progress__item">
+                <li key={f.id} className="header-edit-progress__item">
                   <span className="mono text-sm break-anywhere grow">
                     {basename(f.dest_path || f.source_path)}
                   </span>
                   {r ? (
                     <>
-                      <StatusPill view={retargetResultView(r.status)} />
+                      <StatusPill view={editResultView(r.status)} />
                       {r.reason && <span className="text-xs text-muted">{r.reason}</span>}
                     </>
                   ) : (
@@ -680,25 +749,27 @@ export function Tools() {
       <Dialog
         open={applyConfirmOpen}
         onClose={() => setApplyConfirmOpen(false)}
-        title="Retarget frames?"
+        title={`Edit ${editKey} on frames?`}
         footer={
           <>
             <Button variant="ghost" onClick={() => setApplyConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={runApply}>
-              Retarget {eligibleCount === null && "up to "}
+            {/* A covering preview that found nothing to edit leaves nothing to
+                confirm: every frame would come back skipped. */}
+            <Button variant="primary" onClick={runApply} disabled={eligibleCount === 0}>
+              Edit {eligibleCount === null && "up to "}
               {confirmCount} frame{confirmCount === 1 ? "" : "s"}
             </Button>
           </>
         }
       >
         <p>
-          This rewrites the FITS <span className="mono">OBJECT</span> header and
-          refiles {eligibleCount === null && "up to "}
-          <strong>{confirmCount}</strong> frame{confirmCount === 1 ? "" : "s"} to{" "}
-          <strong>{newTarget.trim()}</strong>. {confirmDetail} Device originals are
-          never touched, and each frame's outcome is reported as it completes.
+          This sets the FITS <span className="mono">{editKey}</span> header to{" "}
+          <strong>{newValue.trim()}</strong> on {eligibleCount === null && "up to "}
+          <strong>{confirmCount}</strong> archived frame{confirmCount === 1 ? "" : "s"},
+          refiling any whose folder changes. {confirmDetail} The original on the device
+          is not modified, and each frame's outcome is reported as it completes.
         </p>
       </Dialog>
     </>

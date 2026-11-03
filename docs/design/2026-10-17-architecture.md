@@ -188,7 +188,7 @@ Run:
     ctx.Done            → return                      // shutdown / rig removed
     cmds                → apply(command)              // reload, pause, resume, run, stop run,
                                                       //   reclassify, reset identity
-    dismiss / restore / link / retarget / refile requests → service, reply   (§3.6)
+    dismiss / restore / link / edit / refile requests → service, reply   (§3.6)
     discovery wake      → re-probe if offline         (§3.9)
     remote wake         → cycle at once unless paused (remote-sites §8)
     ticker              → runCycle unless suspended   // pull, verify, file, delete
@@ -229,7 +229,7 @@ syscall already in flight on the worker.
 | Dismiss an unclassified frame ([frame-lifecycle §13](2026-10-17-frame-lifecycle.md)) | `dismissReqs` | `Run` and `drainCommands` | Touches only the NAS copy and the database; a discard issued during a long pull is handled within one file's time. |
 | Restore, cancel restore, acknowledge, acknowledge a group ([library-reconciliation §4.4, §10.8](2026-10-17-library-reconciliation.md)) | `restoreReqs` | `Run` and `drainCommands` | Row-flag writes that must not race the delete pass; cheap enough to service mid-cycle. |
 | Link a library root ([library-reconciliation §8](2026-10-17-library-reconciliation.md)) | `linkReqs` | `Run` only | Writes the marker and clears missing marks on the NAS; `drainCommands` runs between device operations, so NAS work is not drained there. |
-| Retarget a frame ([routing-and-filing §9.6](2026-10-17-routing-and-filing.md)) | `retargetReqs` | `Run` only | It takes an admission slot; servicing it inside the delete pass, which already holds one, would deadlock a single-slot configuration. |
+| Edit a frame's header, a retarget included ([header-edits §9.1](2026-11-02-header-edits.md), [routing-and-filing §9.6](2026-10-17-routing-and-filing.md)) | `editReqs` | `Run` only | It takes an admission slot; servicing it inside the delete pass, which already holds one, would deadlock a single-slot configuration. |
 | Re-file a group ([routing-and-filing §8.8](2026-10-17-routing-and-filing.md)) | `refileReqs` | `Run` only | It takes no slot; one request carries a whole group so a large migration does not wait one poll per frame. |
 | Re-classify the unclassified area ([routing-and-filing §2.3](2026-10-17-routing-and-filing.md)) | `cmds` (`Reclassify`) | the cycle | A flag the next cycle acts on; it moves files into the tree the same goroutine files into. |
 
@@ -346,7 +346,8 @@ A frame is classified by its FITS header, never by its name or folder, and route
 one editable template per frame class with a specified token rendering; any routing failure
 quarantines it in an unclassified area from which it is never deleted. Night numbering,
 mosaic panels, path safety, filename uniqueness, re-filing and retargeting live in
-[routing-and-filing](2026-10-17-routing-and-filing.md).
+[routing-and-filing](2026-10-17-routing-and-filing.md); editing an archived frame's header cards
+lives in [header-edits](2026-11-02-header-edits.md).
 
 ## 7. Persistence
 
@@ -588,7 +589,7 @@ The `frames` columns, by group; their semantics live in
 | Device anchor | `sha256`, `size`, `mtime` |
 | Archive anchor | `archive_sha256`, `archive_size` |
 | Exposure identity | `data_sha256` |
-| Retarget overlay | `retarget_sha256`, `retarget_from` |
+| Edit overlay | `edit_sha256`, `header_edits` (JSON) |
 | Classification | `frame_type`, `target`, `filter`, `exptime`, `set_temp`, `gain`, `offset`, `binning`, `sensor`, `date_obs`, `night` |
 | Mosaic panel | `panel_base`, `panel_row`, `panel_col` |
 | Filing and state | `dest_path`, `sidecars` (JSON), `state`, `pulled_at`, `deleted_at`, `error` |
@@ -1167,7 +1168,7 @@ diagnostics endpoints (§8.11), every mutating route is `guardWrite` (§8.3) and
 | `GET /api/frames`; `GET /api/rigs/{id}/frames` | transfer history; paginated per-rig frame lists |
 | `DELETE /api/rigs/{id}/frames/{frameId}` | dismiss an unclassified frame (§3.6) |
 | `POST /api/rigs/{id}/library/link`, `/library/scan`; restore, acknowledge, missing-group acknowledge; `GET /api/library/status` | library reconciliation ([library-reconciliation §4.5](2026-10-17-library-reconciliation.md)) |
-| `POST /api/rigs/{id}/retarget/{preview,apply}`, `/refile/{preview,apply}` | retargeting and re-filing ([routing-and-filing §8.11, §9.6](2026-10-17-routing-and-filing.md)) |
+| `POST /api/rigs/{id}/edit/{preview,apply}`, `/refile/{preview,apply}` | header edits, retargeting included, and re-filing ([header-edits §9.1](2026-11-02-header-edits.md), [routing-and-filing §8.11, §9.6](2026-10-17-routing-and-filing.md)) |
 | `GET /api/frames/{frameId}/image`, `/image/meta` | previews ([features §1.4](2026-10-17-features.md)) |
 | `GET /api/rigs/{id}/summary`, `/logs` | morning summary; pulled device logs |
 | `POST /api/scan`; `GET /api/discovered`; `POST /api/discovered/{guid}/shares` | discovery and the adopt dialog (§3.3, §3.9) |
@@ -1358,7 +1359,8 @@ This section fixes what each surface shows and the data behind it, not its look.
   now on its rig (frame-lifecycle §4.3); a held frame has no operator exit
   ([delete-safety §2.4](2026-10-17-delete-safety.md)), and the dialog says so rather than offer
   one.
-- **Tools** (`/tools`) — find frames, retarget, and re-file to the current templates.
+- **Tools** (`/tools`) — find frames, edit a header card (retarget, set the filter), and re-file to
+  the current templates.
 - **Files** (`/files`) — the device file browser.
 - **Settings** (`/settings`) — templates with an edit mode whose token chips are scoped to
   the template being edited and insert at the cursor, plus a **live preview** of where a real

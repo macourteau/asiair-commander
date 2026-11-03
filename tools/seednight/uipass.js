@@ -1,4 +1,4 @@
-// Headless browser pass for the retarget preview's night projection.
+// Headless browser pass for the Edit header preview's night projection (OBJECT).
 //
 // The preview card only exists after an operator selects frames on Tools, types a
 // target and clicks Preview, so scripts/screenshots.mjs — which drives one URL per
@@ -92,19 +92,19 @@ async function run(browser, device) {
   );
 
   await page.getByLabel("New target").fill("NGC7380");
-  // Two cards on this page have a Preview button — Retarget's comes first in the
+  // Two cards on this page have a Preview button — Edit header's comes first in the
   // DOM, Re-file's is further down.
   await page.getByRole("button", { name: "Preview" }).first().click();
-  await page.waitForSelector(".retarget-preview__item");
+  await page.waitForSelector(".header-edit-preview__item");
   await page.waitForFunction(
-    () => document.querySelectorAll(".retarget-preview__item").length === 4,
+    () => document.querySelectorAll(".header-edit-preview__item").length === 4,
   );
 
-  const card = page.locator(".retarget-preview").locator("..");
+  const card = page.locator(".header-edit-preview").locator("..");
   await card.scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
 
-  const items = page.locator(".retarget-preview__item");
+  const items = page.locator(".header-edit-preview__item");
   const texts = [];
   for (let i = 0; i < 4; i++) texts.push((await items.nth(i).innerText()).replace(/\s+/g, " "));
   console.log(`\n--- ${device.name}: preview rows as rendered ---`);

@@ -1342,26 +1342,45 @@ func TestUpgradeV4ToV5RestampsMissingMarks(t *testing.T) {
 	}
 }
 
-// --- retarget overlay ----------------------------------------------------------
+// --- edit overlay --------------------------------------------------------------
 
-// TestFreshDBIsSchema11AndHasOverlayColumns pins that a fresh Open lands at schema
-// version 11 and that the retarget overlay, mosaic pane and copy-keyed columns exist
+// objectEdits is a retargeted frame's overlay: one OBJECT entry, from = the
+// original target ("" records none).
+func objectEdits(value, from string) model.HeaderEdits {
+	var f *string
+	if from != "" {
+		f = &from
+	}
+	return model.HeaderEdits{{Key: "OBJECT", Value: value, From: f}}
+}
+
+// objectFrom is the original target an overlay's OBJECT entry records, "" when it
+// has no entry or the entry records none.
+func objectFrom(e model.HeaderEdits) string {
+	if h, ok := e.Lookup("OBJECT"); ok && h.From != nil {
+		return *h.From
+	}
+	return ""
+}
+
+// TestFreshDBIsSchema12AndHasOverlayColumns pins that a fresh Open lands at schema
+// version 12 and that the edit overlay, mosaic pane and copy-keyed columns exist
 // on the frames table. Column PRESENCE is all this proves; the positional coupling
 // between frameColumns, scanFrame and UpsertFrame is pinned by
 // TestFrameColumnsRoundTripEveryColumn.
-func TestFreshDBIsSchema11AndHasOverlayColumns(t *testing.T) {
+func TestFreshDBIsSchema12AndHasOverlayColumns(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t).(*sqlStore)
 
-	if model.CurrentStoreSchemaVersion != 11 {
-		t.Fatalf("CurrentStoreSchemaVersion = %d, want 11", model.CurrentStoreSchemaVersion)
+	if model.CurrentStoreSchemaVersion != 12 {
+		t.Fatalf("CurrentStoreSchemaVersion = %d, want 12", model.CurrentStoreSchemaVersion)
 	}
 	v, err := s.schemaVersion(ctx)
 	if err != nil {
 		t.Fatalf("schemaVersion: %v", err)
 	}
-	if v != 11 {
-		t.Fatalf("fresh DB schema_version = %d, want 11", v)
+	if v != 12 {
+		t.Fatalf("fresh DB schema_version = %d, want 12", v)
 	}
 
 	cols := map[string]bool{}
@@ -1380,8 +1399,11 @@ func TestFreshDBIsSchema11AndHasOverlayColumns(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !cols["retarget_sha256"] || !cols["retarget_from"] {
-		t.Fatalf("frames table missing retarget columns; have %v", cols)
+	if !cols["edit_sha256"] || !cols["header_edits"] {
+		t.Fatalf("frames table missing edit overlay columns; have %v", cols)
+	}
+	if cols["retarget_sha256"] || cols["retarget_from"] {
+		t.Fatalf("frames table still carries the retarget columns migrate12 replaces; have %v", cols)
 	}
 	if !cols["panel_base"] || !cols["panel_row"] || !cols["panel_col"] {
 		t.Fatalf("frames table missing mosaic pane columns; have %v", cols)
@@ -1404,7 +1426,7 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 		RigID: "rig-rt", SourceShare: "Udisk", SourcePath: "Autorun/light_007.fit",
 		SHA256: "orighash", Size: 100, Mtime: 1, FrameType: "LIGHT", Target: "M31",
 		State: model.StateVerified, DestPath: "/lib/M31/light_007.fit",
-		RetargetSHA256: "archhash", RetargetFrom: "Moon",
+		EditSHA256: "archhash", HeaderEdits: objectEdits("M31", "Moon"),
 	}
 	if err := s.UpsertFrame(ctx, base); err != nil {
 		t.Fatalf("upsert (set): %v", err)
@@ -1413,8 +1435,8 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetFrameByID: ok=%v err=%v", ok, err)
 	}
-	if got.RetargetSHA256 != "archhash" || got.RetargetFrom != "Moon" {
-		t.Fatalf("overlay not round-tripped: sha=%q from=%q", got.RetargetSHA256, got.RetargetFrom)
+	if got.EditSHA256 != "archhash" || objectFrom(got.HeaderEdits) != "Moon" {
+		t.Fatalf("overlay not round-tripped: sha=%q from=%q", got.EditSHA256, objectFrom(got.HeaderEdits))
 	}
 	if got.SHA256 != "orighash" {
 		t.Fatalf("sha256 must stay the original anchor, got %q", got.SHA256)
@@ -1424,8 +1446,8 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 	// the columns must RESET to "" (NULL), exactly as a differ re-pull needs.
 	reset := *base
 	reset.ID = 0
-	reset.RetargetSHA256 = ""
-	reset.RetargetFrom = ""
+	reset.EditSHA256 = ""
+	reset.HeaderEdits = nil
 	if err := s.UpsertFrame(ctx, &reset); err != nil {
 		t.Fatalf("upsert (reset): %v", err)
 	}
@@ -1433,8 +1455,8 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RetargetSHA256 != "" || got.RetargetFrom != "" {
-		t.Fatalf("overlay must reset to empty on a re-file, got sha=%q from=%q", got.RetargetSHA256, got.RetargetFrom)
+	if got.EditSHA256 != "" || objectFrom(got.HeaderEdits) != "" {
+		t.Fatalf("overlay must reset to empty on a re-file, got sha=%q from=%q", got.EditSHA256, objectFrom(got.HeaderEdits))
 	}
 	if got.ID != base.ID {
 		t.Fatalf("re-file must keep the same row id: was %d now %d", base.ID, got.ID)
@@ -1443,8 +1465,8 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 	// A retarget re-files with the overlay set again: it must SET the columns.
 	set := *base
 	set.ID = 0
-	set.RetargetSHA256 = "arch2"
-	set.RetargetFrom = "Jupiter"
+	set.EditSHA256 = "arch2"
+	set.HeaderEdits = objectEdits("M31", "Jupiter")
 	if err := s.UpsertFrame(ctx, &set); err != nil {
 		t.Fatalf("upsert (set again): %v", err)
 	}
@@ -1452,8 +1474,8 @@ func TestRetargetOverlaySetResetSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RetargetSHA256 != "arch2" || got.RetargetFrom != "Jupiter" {
-		t.Fatalf("overlay must set on a retarget, got sha=%q from=%q", got.RetargetSHA256, got.RetargetFrom)
+	if got.EditSHA256 != "arch2" || objectFrom(got.HeaderEdits) != "Jupiter" {
+		t.Fatalf("overlay must set on a retarget, got sha=%q from=%q", got.EditSHA256, objectFrom(got.HeaderEdits))
 	}
 }
 

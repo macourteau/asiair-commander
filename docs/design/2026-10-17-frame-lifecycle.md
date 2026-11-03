@@ -399,10 +399,11 @@ For a light frame, a missing `OBJECT` or `DATE-OBS` quarantines before a night i
 missing value never pollutes `night_counters`. The embedded WCS is extracted here once and
 carried into the row ([features §2](2026-10-17-features.md)).
 
-A retargeted frame re-pulled from the device carries its original `OBJECT` card, so before
-classification the filing step re-applies the operator's edit when the incoming bytes are the
-same exposure the overlay describes
-([routing-and-filing §9.4](2026-10-17-routing-and-filing.md); §11.11 for a revised frame).
+An edited frame — retargeted, or with any other header card edited — re-pulled from the device
+carries its original cards, so before classification the filing step re-applies the operator's
+edits when the incoming bytes are the same exposure the overlay describes
+([routing-and-filing §9.4](2026-10-17-routing-and-filing.md),
+[header-edits §6](2026-11-02-header-edits.md); §11.11 for a revised frame).
 
 ## 8. Route and file
 
@@ -474,8 +475,8 @@ report frames dedupe by `dest_path` ([architecture §7.7](2026-10-17-architectur
 - An idempotent keep **preserves** a surviving row's `pulled_at`: a re-pull after a crash must
   not restart the grace clock, nor leave a filed frame unrecorded and so never deletable
   (`TestFileIdempotentRePullPreservesPulledAt`).
-- Reclassify and retarget preserve it: they move the archive copy, and the device copy was not
-  read again.
+- Reclassify and a header edit (a retarget included) preserve it: they move or rewrite the archive
+  copy, and the device copy was not read again.
 - A supersede **resets** it (§11.7). The rule above governs a re-pull of identical bytes, where
   nothing was read afresh; a revision is different bytes, freshly written by the device and
   freshly verified, and the clock exists so that a later device read is independent of the first.
@@ -541,7 +542,7 @@ Deletion requires
   anchor** (§11.1),
 
 plus the source re-stat of §9.6 immediately before the delete. On a frame never revised or
-retargeted the two anchors are one value and the check is one transitive proof that both copies
+edited the two anchors are one value and the check is one transitive proof that both copies
 are byte-identical to what was filed. A genuine mismatch holds the frame with a critical
 `delete_mismatch` alert and never deletes (`TestDeleteCorruptNASHoldsNoDelete`); a match deletes
 (`TestDeleteThreeWayMatchDeletesFrameAndSidecar`).
@@ -714,9 +715,9 @@ at once. This is the home of the frame-row column semantics; [architecture
 | Group | Columns | What they hold |
 | --- | --- | --- |
 | Device | `sha256`, `size`, `mtime` | The device file's whole-file hash, length and modification time as last proven. A supersede advances them; only device-side checks read them. `sha256` is the **current device anchor**, not an immutable one. |
-| Archive | `archive_sha256`, `archive_size` | What the archive copy must hash to, and the length every archive-side comparison uses: `VerifyRead`'s length, the idempotent-keep size test, the retarget faithfulness checks. |
+| Archive | `archive_sha256`, `archive_size` | What the archive copy must hash to, and the length every archive-side comparison uses: `VerifyRead`'s length, the idempotent-keep size test, the header-edit faithfulness proof. `archive_size` can differ from `size` after an edit that inserts a card and grows the header by a block ([header-edits §7](2026-11-02-header-edits.md)). |
 | Neither | `data_sha256` | The exposure's identity, side-independent and fixed for the exposure's life (§11.3). |
-| Overlay | `retarget_sha256`, `retarget_from` | The audit record of a retarget: that a re-label happened and what it was. Not an archive-side expectation ([routing-and-filing §9.2](2026-10-17-routing-and-filing.md)). |
+| Overlay | `edit_sha256`, `header_edits` | The audit record of the header edits, a retarget included: that the archive is an edit of its device copy, and the ordered list of each edited key's value and its device copy's original. Not an archive-side expectation ([header-edits §5](2026-11-02-header-edits.md)). |
 | Lifecycle | `state`, `pulled_at`, `delete_defer_count` | Where the row stands, when its grace clock last started, and how many delete passes have deferred on a changed source in the current episode (§11.13). They describe the row's progress, not either copy. |
 
 `archiveHash(f)` is a field read of `archive_sha256`. There is no fallback from an empty archive
@@ -725,7 +726,8 @@ turns a good archive copy into a critical `delete_mismatch`, which a store-level
 loudly (AC18) instead of letting it degrade silently. A row whose archive hash is empty is never
 superseded (§11.4). The store migration seeds a row whose archive columns are empty:
 `archive_sha256` to `retarget_sha256` where an overlay exists, else `sha256`, and `archive_size`
-to `size` (AC19).
+to `size` (AC19). `retarget_sha256` is the overlay column's name at that migration; migration 12
+renamed it `edit_sha256` ([header-edits §5.2](2026-11-02-header-edits.md)).
 
 **Any path that writes a shared archive file commits every row sharing that `dest_path`.** The
 archive side moves with the file, so a path that changes the file and commits one row leaves every
@@ -759,9 +761,11 @@ identity. The guarantee for that row is that each copy is what the ledger record
 both carry the same exposure. That narrower guarantee is accepted for one artifact — a second row
 sharing a revised file — whose own archive expectation does match the file in front of it.
 
-One path outside this section does not honour the commit rule: the retarget operation removes
-the old archive copy without a sharer check. That gap is recorded with retargeting
-([routing-and-filing §9.8](2026-10-17-routing-and-filing.md)).
+One path outside this section does not honour the commit rule: a header edit committed through the
+filing path, which every retarget is, removes the old archive copy without a sharer check. That gap
+is recorded with retargeting ([routing-and-filing §9.8](2026-10-17-routing-and-filing.md)); an edit
+committed in place supersedes the file and commits every sharer (§11.9,
+[header-edits §8](2026-11-02-header-edits.md)).
 
 ### 11.2 What each write path advances
 
@@ -771,11 +775,12 @@ writes the value the path has just proven; **preserved** is a value the path del
 through a write that would otherwise clear it; **reset** returns the counter to zero; **untouched**
 is not written.
 
-| Write path | `sha256` | `size` | `mtime` | `data_sha256` | `archive_sha256` | `archive_size` | `retarget_sha256` | `retarget_from` | `state` | `pulled_at` | `delete_defer_count` |
+| Write path | `sha256` | `size` | `mtime` | `data_sha256` | `archive_sha256` | `archive_size` | `edit_sha256` | `header_edits` | `state` | `pulled_at` | `delete_defer_count` |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Supersede, the revised row | advances | advances | advances | preserved | advances | advances | untouched | untouched | advances | advances | reset |
 | Supersede, a `dest_path` sharer | untouched | untouched | untouched | untouched | advances | advances | advances | untouched | untouched | untouched | untouched |
-| Retarget re-apply, the revised row | advances | advances | advances | preserved | advances | advances | advances | untouched | advances | advances | reset |
+| Edit re-apply, the revised row | advances | advances | advances | preserved | advances | advances | advances | untouched | advances | advances | reset |
+| In-place header edit, the edited row and every `dest_path` sharer | untouched | untouched | untouched | untouched | advances | advances | advances | advances | untouched | untouched | untouched |
 | Culled targeted write | advances | advances | advances | advances | untouched | untouched | untouched | untouched | untouched | untouched | reset |
 | Restore, the row whose device copy is read | advances | advances | advances | preserved | advances | advances | advances | untouched | advances | advances | reset |
 | Restore, a `dest_path` sharer | untouched | untouched | untouched | untouched | advances | advances | advances | untouched | untouched | untouched | untouched |
@@ -784,8 +789,13 @@ is not written.
 | Crash recovery (supersede intent replay) | advances | advances | advances | preserved | advances | advances | as recovered | untouched | advances | advances | reset |
 
 Crash recovery replays a commit and decides nothing of its own; **as recovered** is whatever the
-commit being recovered advances in that column. `retarget_sha256` advances only on a row that
-already carries an overlay, so a frame never retargeted never gains one.
+commit being recovered advances in that column. A revision advances `edit_sha256` only on a row
+that already carries an overlay, so a frame never edited never gains one from a revision.
+
+The in-place header edit is the supersede's second caller (§11.9). No device copy was read, so it
+writes none of the device or lifecycle columns, and a `deleted` row stays `deleted`; it sets
+`edit_sha256` on **every** sharer, because each now describes an edited file, and writes the edited
+`header_edits` and `filter` to each ([header-edits §8](2026-11-02-header-edits.md)).
 
 A sharer's `state` and `pulled_at` stay untouched because a supersede changes only what that row
 records about the archive copy: its own device copy was not read, its grace clock guards that
@@ -796,7 +806,7 @@ terms; whether a repair discharges another row's hold depends on why that row wa
 restore of the standing request already clears it once the archive verifies.
 
 A restore's `pulled_at` advances because a restore writes an archive copy from device bytes read
-once, so grace restarts before that original becomes deletable. `retarget_sha256` advances
+once, so grace restarts before that original becomes deletable. `edit_sha256` advances
 wherever the edited file is rewritten, because an audit record that silently stops matching the
 file it describes invites reading it as the archive expectation, conflating the device and archive
 anchors. Advancing it
@@ -816,7 +826,7 @@ with another.
 one, so a re-file arriving without a digest never nulls a recorded identity (AC12).
 
 The rule binds the **consumers** of the digest, not every producer of a `sha256`. There are five:
-the incoming staging temp at filing (leg 1 of §11.7), the archive copy for leg 3, the retarget
+the incoming staging temp at filing (leg 1 of §11.7), the archive copy for leg 3, the edit
 re-apply's comparison, the culled-original drain's device re-hash (which carries the backfill's
 device-side proof, §11.8), and the restore's device stream. None makes a second whole-file pass
 (AC10):
@@ -1029,6 +1039,17 @@ pass, in **both** windows the swap opens:
 
 That deferral is what closes the crash window by construction rather than after the fact.
 
+The claim has two callers, told apart by the intent's `kind`. A **`revision`** installs the
+device's revised copy (§11.7) and commits as §11.2's supersede rows. An **`edit`** installs an
+operator's header edit of the archive copy whose route is unchanged
+([header-edits §8](2026-11-02-header-edits.md)): its intent also carries the edited `header_edits`
+and `filter`, and its commit (`store.commitEdit`) writes `archive_sha256`, `archive_size`,
+`edit_sha256`, `header_edits` and `filter` on every row sharing the path and omits every device and
+lifecycle column from its SQL, so a recovery replaying it days later cannot restore stale values.
+The four steps, the deferrals, the rollback and the recovery arms below are the same for both; an
+intent left open across the migration that added `kind` recovers as a `revision`. Tests:
+`TestCommitSupersedeEditKind`, `TestRecoverSupersedeIntent_EditKind`, `TestEdit_InPlaceCrashWindows`.
+
 A swap that fails before its commit rolls back: the installed revised copy, if any, is removed (it
 is a copy of a device original that is still on the device), and the copy set aside is renamed back.
 A rollback that itself fails leaves the intent open, which keeps the frame out of the delete pass
@@ -1076,8 +1097,8 @@ restore a second astrometry writer, and the path that re-extracts is the column'
 
 ### 11.11 The other two consequences
 
-**The retarget re-apply test** decides whether freshly streamed device bytes are the frame whose
-`OBJECT` card was edited. It is a disjunction: `dataHash == prior.data_sha256` **or**
+**The edit re-apply test** decides whether freshly streamed device bytes are the frame whose
+header cards were edited. It is a disjunction: `dataHash == prior.data_sha256` **or**
 `streamHash == prior.sha256` — the same exposure, whatever its header says. The first arm is what
 the rule means; the second is kept because a byte-identical re-pull is the same exposure by
 definition, and because a row the backfill has not reached has an empty `data_sha256` that no
@@ -1086,26 +1107,30 @@ recorded digest of an empty data unit, and two header-only frames never match on
 digest (AC6), which would otherwise re-apply the overlay to a file it does not describe and leave
 the frame deferred forever.
 
-The re-apply's faithfulness proof is three checks, and all three are **re-anchored to the file in
-hand** without being relaxed: the claim they prove is that the edit changed exactly the `OBJECT`
-card and left the science data untouched, the authorization chain the retarget invariants protect
-([routing-and-filing §9.9](2026-10-17-routing-and-filing.md), INV-4).
+The re-apply's faithfulness proof is the edit operation's own (`proveEdit`,
+[header-edits §4.3](2026-11-02-header-edits.md)), and every check is **re-anchored to the file in
+hand** without being relaxed: the claim they prove is that the edit changed exactly the edited cards
+and left the science data untouched, the authorization chain the retarget and header-edit
+invariants protect ([routing-and-filing §9.9](2026-10-17-routing-and-filing.md), INV-4;
+header-edits HE-3).
 
 | Check | Anchored to |
 | --- | --- |
-| The edit's own assertion (`assertRetargetEdit`): sizes and the complement digests of every byte outside the 80-byte `OBJECT` window | the **incoming** file's size |
-| The rewritten temp's at-rest verify length | the incoming file's size |
+| The raw-card comparison, the padding check and the data digest of the source | the **incoming** file and its own data digest |
+| The growth: the edited header's growth equals the edited length minus the incoming length | the incoming file's length and the edited file's `OutputSize` |
+| The rewritten temp's at-rest verify length | the edited file's `OutputSize` |
 | The rewritten temp's at-rest verify hash | the digest the rewriter computed over every byte it wrote (`OutputSHA256`) |
 
-The third keeps its read-back, the only check on that path that the durable file holds what the
-rewriter produced; replacing it with a data-unit comparison would prove nothing the complement
-check does not (§11.14). The row then commits with the archive side taken from the **edited** file
+The at-rest hash keeps its read-back, the only check on that path that the durable file holds what
+the rewriter produced; replacing it with a data-unit comparison would prove nothing the card and
+data checks do not (§11.14). The edited length, not the incoming one, is what `archive_size` takes
+(header-edits §7). The row then commits with the archive side taken from the **edited** file
 — those are the bytes that land on the archive — and the device side from the streamed bytes:
 `sha256` is always the hash of the bytes just pulled off the device. Committing the pre-revision
 device hash would leave `deviceHash != sha256` on every delete pass, a permanent critical
 `delete_mismatch` (AC16).
 
-One row falls outside the disjunction. A retargeted frame with no recorded `data_sha256` has
+One row falls outside the disjunction. An edited frame with no recorded `data_sha256` has
 no identity, so the first arm cannot speak, and a revision changes its bytes, so the second cannot
 either. The re-apply declines, and the supersede is then **refused**: installing the device's
 unedited bytes under an overlay claiming an edit they do not carry would create a false audit record
@@ -1226,7 +1251,7 @@ anchors describe the revised bytes.
 | Wait for a firmware change | The behaviour is undocumented, long-standing, and costs frames and disk meanwhile. |
 | Leave `localfs` untouched, taking the data digest from a second pass or a buffered read | A second whole-file pass is what AC10 forbids, and a buffered read discards the cache bypass that makes leg 3 a proof. |
 | Bind every producer of a `sha256` rather than the consumers | Pushes FITS structure into the byte-level hash every `VerifyRead` shares, and makes an unparseable header an I/O failure everywhere, turning a rotted copy's critical `frame_lost` into an indefinite deferral. |
-| Replace the third faithfulness check with a data-unit comparison | The complement check already covers every byte outside the `OBJECT` window, data unit included; it would remove the only at-rest read-back on that path, which is what stops a write fault minting the safety anchor from corrupted bytes (INV-4). |
+| Replace the at-rest hash check with a data-unit comparison | The card and data checks already cover every card outside the edited ones and the data unit; it would remove the only at-rest read-back on that path, which is what stops a write fault minting the safety anchor from corrupted bytes (INV-4). |
 | A `COALESCE` bridge inside `archiveHash` | A missed write site would degrade silently, re-welding the two sides. The store-level test fails loudly instead. |
 | Evaluate the discriminator at the pre-delete gate | Streams the whole file at a gate that costs nothing, and mints the very alert the deferral exists to keep off a settling frame. |
 | Key the four-step claim off the candidate name | A row's `dest_path` can be a token-suffixed name while candidate 0 is a different frame's file; keying off the candidate would orphan the file the row, and its overlay, describe. |
@@ -1269,12 +1294,12 @@ The criteria keep their numbers; tests cite them as "design frame-lifecycle AC*n
    `file_failed` outcome. Tests: `TestCulledFrameRevisionAdvancesAnchorsAndFilesNothing`,
    `TestCulledFrameRevisionStopsRepullingAndDrains`.
 8. A retargeted frame the device then revises keeps its `OBJECT` overlay and destination folder, is
-   filed rather than deferred, and ends with `archive_sha256` and `retarget_sha256` matching the
+   filed rather than deferred, and ends with `archive_sha256` and `edit_sha256` matching the
    bytes on the NAS; the faithfulness check still rejects an edit touching any byte outside the
    `OBJECT` card. Tests: `TestRetargetedFrameSurvivesARevision`,
    `TestRevisionReapplyRefusesACorruptingWriter`.
 9. A retargeted frame sharing a `dest_path` with a frame the device revises ends with **both** rows'
-   `retarget_sha256` describing the bytes the shared file holds, and neither row is held on its next
+   `edit_sha256` describing the bytes the shared file holds, and neither row is held on its next
    delete pass. The two-row state is built through the real filing path's idempotent keep. Test:
    `TestSupersedeAdvancesASharersOverlay`.
 10. No consumer of a data unit makes a second whole-file pass; the leg-3 header pre-read does not
@@ -1303,7 +1328,7 @@ The criteria keep their numbers; tests cite them as "design frame-lifecycle AC*n
     restores the canonical file before any worker starts. While an intent is open the delete pass
     defers the frame in **both** the absent-copy and the present-copy branch. No injection point
     yields a critical `frame_lost` or `delete_mismatch`, and a crash during a supersede of a
-    retargeted frame recovers with `retarget_sha256` matching the committed file. Tests:
+    retargeted frame recovers with `edit_sha256` matching the committed file. Tests:
     `TestSupersedeCrashAtEveryStepRecovers`, `TestSupersedeInFlightDefersASharerWhoseCopyIsPresent`,
     `TestSupersedeRecoveryReAnchorsARetargetedFrame`.
 14. A revision arriving after grace — the delete pass reaching the frame before the pull supersedes
@@ -1320,15 +1345,16 @@ The criteria keep their numbers; tests cite them as "design frame-lifecycle AC*n
 17. A supersede leaves `wcs_status` reflecting the revised file's own header: a seeded Tier-1
     `failed` verdict is replaced by the header verdict. The criterion asserts that outcome, not the
     `ClearFrameAstrometry` call. Test: `TestSupersedeReExtractsTheAstrometry`.
-18. Every filing path — filing, retarget and restore — leaves `archive_sha256` non-empty and
+18. Every filing path — filing, header edit and restore — leaves `archive_sha256` non-empty and
     `archive_size` non-zero. Test: `TestEveryFilingWriterSetsTheArchiveAnchors`.
 19. The store migration seeds a row whose archive columns are empty: `archive_sha256` =
-    `retarget_sha256` where an overlay exists, else `sha256`; `archive_size` = `size`; and a delete
+    `retarget_sha256` (the overlay column's name at that migration; `edit_sha256` from migration 12)
+    where an overlay exists, else `sha256`; `archive_size` = `size`; and a delete
     pass over seeded rows of both shapes holds none of them. The unseeded rows are built through the
     store. Test: `TestDayZeroMigrationSeedsTheArchiveAnchors`.
 20. A restore request on a culled frame the device has since revised, at an unshared `dest_path`,
     completes: the restore writes the revised bytes, the row's anchors advance on both sides (`size`,
-    `mtime`, `pulled_at`, and `retarget_sha256` where an overlay exists), and no
+    `mtime`, `pulled_at`, and `edit_sha256` where an overlay exists), and no
     `HoldRestoreMismatch` is raised. Tests: `TestRestoreOfARevisedCulledFrameWritesTheRevisedBytes`,
     `TestRestoreOfARevisedRetargetedFrameAdvancesTheOverlay`.
 21. A superseded frame's `pulled_at` is the supersede instant: its device original is not deletable

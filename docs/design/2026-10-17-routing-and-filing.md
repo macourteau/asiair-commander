@@ -8,6 +8,10 @@ scope, the never-renumber rule, the destination folder deciding the ordinal for 
 has not seen, and case as target identity; mosaic panel grouping; re-filing archived frames to
 the current templates, which is a move and not a filing; and retargeting, which edits the
 archive's `OBJECT` card, keeps the device anchor intact and re-applies the edit on every re-pull.
+Retargeting is the `OBJECT` case of the header edit: the card writer, its faithfulness proof, the
+edit overlay, the re-apply of the whole edit list and the edit endpoints are owned by
+[header-edits](2026-11-02-header-edits.md), and this doc keeps what is specific to `OBJECT` — the
+folded, sanitised target, the night it files under and the preview's night and spelling reports.
 It hosts the night invariants INV-N1–INV-N7 (§6.9), the retarget invariants INV-1–INV-10 (§9.9),
 the mosaic and re-file invariants INV-M1–INV-M11 (§10) and the mosaic and re-file acceptance
 criteria (§11). The pull, the at-rest verify, the atomic claim of a filename and the delete pass
@@ -586,7 +590,7 @@ fold happens:
 - in `nightFor`, before anything else, on every light filing path (live pull, re-classify,
   retarget apply), which also writes the folded target to the frame row — the ordinal and the
   spelling cannot be settled apart, since `<TARGET>` renders the folder the ordinal is scoped to;
-- in the retarget operation, before `RewriteObject` writes the card, so the card agrees with the
+- in the retarget operation, before `header.EditCards` writes the card, so the card agrees with the
   row (a disagreement would fail the re-apply check on every later re-pull, §9.4); the preview
   folds the same way, keeping the typed spelling if the read fails;
 - at every night-counter read in the store (`target = ? COLLATE NOCASE` in `AssignNight`,
@@ -613,16 +617,16 @@ written as `NGC 6888` carry two `OBJECT` spellings, and anything grouping by `OB
 included, which routes off the raw stored target — sees two targets. So the retarget preview
 reports `existing_spellings`: the raw spellings (`store.DistinctTargetsUnder`) found in the
 **exact night folder** the projection resolved, that differ from the target as it will be written.
-It compares against the sanitised, folded target, because `RewriteObject` sanitises before writing
-and comparing against the typed string would report a spurious divergence for `NGC:6888`. It reads
-the resolved night folder rather than the prefix, or a plain-target retarget under the shipped
+It compares against the sanitised, folded target, because the `OBJECT` value rule sanitises before
+the card is written, and comparing against the typed string would report a spurious divergence for
+`NGC:6888`. It reads the resolved night folder rather than the prefix, or a plain-target retarget under the shipped
 mosaic template would report every panel's spelling. On the mint arm the folder does not exist
 yet, so the list is empty by construction. The page renders it as "Already filed here as …
 — applying will leave two spellings of this target in one folder", listing up to three.
 
 Nothing is rewritten on the operator's behalf and the row stays eligible. There is no eligibility
-check on the typed target: `RewriteObject` sanitises before writing the card, so `CON`, `M31.` and
-`NGC:6888` retarget successfully, landing as `_CON`, `M31` and `NGC_6888`. The no-op guard stays a
+check on the typed target: the `OBJECT` value rule sanitises before the card is written, so `CON`,
+`M31.` and `NGC:6888` retarget successfully, landing as `_CON`, `M31` and `NGC_6888`. The no-op guard stays a
 string comparison after folding, because a spelling-only retarget (`NGC6888` → `NGC 6888`) is the
 supported way to re-point frames at a target's established spelling.
 
@@ -978,7 +982,7 @@ must not have:
 
 | Filing behaviour | What it would do to a re-filed frame |
 |---|---|
-| The upsert writes the overlay and archive anchors from its inputs | Resets the retarget overlay and archive anchor; the archive-side check then fails against the edited file, the frame is held with a critical `delete_mismatch`, and its device original is never released. |
+| The upsert writes the overlay and archive anchors from its inputs | Resets the edit overlay and archive anchor; the archive-side check then fails against the edited file, the frame is held with a critical `delete_mismatch`, and its device original is never released. |
 | Re-classify sets `state = verified`, clears `deleted_at` | Resurrects a `deleted` frame: it re-enters deletion eligibility against a device original that no longer exists, inflates the resident and power-off counts, and escapes retention. |
 | The upsert clears `missing_seen_at`, `missing_acked_at`, `restore_requested_at` | Silently erases reconciliation state. |
 | A non-reclassify filing charges transfer bytes | Charges a local rename to the transfer budget. |
@@ -1030,15 +1034,21 @@ details are load-bearing:
 - **The stored `night` is passed through.** A zero would render `NIGHT_0` for every light and INV-M10
   would refuse them all; `AssignNight` is never called, since minting would strand the frame in a
   `NIGHT_n` its siblings do not share.
-- **Every stored scalar except `SET-TEMP` (and the parsed binning and date) is treated as present.**
-  Binning and `DATE-OBS` count as present only when the stored value parses. Exposure, gain and
-  offset are stored raw, so a legitimate zero is indistinguishable from an absent card. A `!= 0`
+- **Every stored scalar except `SET-TEMP` and `FILTER` (and the parsed binning and date) is treated
+  as present.** Binning and `DATE-OBS` count as present only when the stored value parses.
+  Exposure, gain and offset are stored raw, so a legitimate zero is indistinguishable from an absent card. A `!= 0`
   test would report a cooled camera's legitimate gain 0 as unroutable across a whole library.
   `SET-TEMP` alone records its absence on the row, because an absent set-point routes to `uncooled`
   rather than quarantining, and assuming presence would move every uncooled frame into a `0C`
   folder. The residual: a frame that genuinely lacks `GAIN` re-files into a `gain0` folder where
   live filing would have quarantined it, reachable only when a template acquired `<GAIN>` after the
   frame was filed. Nothing is lost; the row still points at the file.
+- **An empty stored `filter` reads as absent.** The row stores an absent `FILTER` card as `""`, and
+  classification leaves an absent card absent; a present-but-empty `<FILTER>` renders as a
+  quarantine or a dangling separator where an absent one collapses (§3.4), so reading `""` as present
+  would route a filterless frame away from where its live pull filed it. The header-edit preview
+  reads the stored filter the same way, so the two rebuilds agree
+  ([header-edits §9.1](2026-11-02-header-edits.md); `TestRefile_FilterlessFrameRoutesAsFiled`).
 - The target is the **raw** stored `target`, matching the filing path, because template selection
   depends on it: a preview that transformed it differently from apply would disagree about whether
   a frame is in scope at all. The retarget preview makes the opposite choice for the same reason
@@ -1317,34 +1327,32 @@ type the correct target, preview where each will move, and apply. Applying rewri
 `OBJECT` card, re-files the archive to the correct folder and updates the row — **without disturbing
 the anchors that let the delete pass release the device original.**
 
-### 9.1 The OBJECT card rewriter
+### 9.1 The OBJECT card
 
-`header.RewriteObject(src, dst, target)` streams `src` to `dst`, replacing exactly the effective
-`OBJECT` value card and copying every other byte — every other card and the whole data unit —
-verbatim, so byte offsets and the 2880-byte block padding are preserved. It never decodes the data
-unit; the cost is one streamed copy.
+The card is written by `header.EditCards`, the allowlisted header-edit writer: it streams the archive
+to a temp, replaces the one value card of each edited key with its canonical card, never decodes the
+data unit, and `fsync`s the temp before returning. The writer, its refusals and the faithfulness
+proof the worker makes from the files at rest are owned by
+[header-edits §4](2026-11-02-header-edits.md). What is specific to `OBJECT`:
 
-- It locates the single card whose normalised key is `OBJECT` and which is a **value** card (columns
-  9–10 are `= `), scanning the header blocks before `END`.
-- The replacement is the canonical form `OBJECT  = '<target>'`, the target sanitised (§4.1), quoted
-  with doubled-quote escaping, blank-padded to the FITS fixed-format minimum of eight characters (the
-  closing quote at column 20 or later) and the card space-padded to 80 columns. Any comment on the
-  original card is dropped, keeping the rewrite deterministic.
-- In the same pass it computes the **complement digests**: a SHA-256 over every byte outside the
-  80-byte card window of the input, and the same over the output. Equal digests byte-prove that the
-  data unit and every other card survived, at no extra I/O. It also computes `OutputSHA256` over
-  every byte written, which the caller compares to the at-rest read-back.
-- `dst` is fsynced before returning, so the durable file precedes any rename.
-- It refuses when there is no `OBJECT` value card, when there is more than one (pathological for
-  ASIAIR frames; refuse rather than guess), when the target sanitises empty, or when the sanitised
-  value exceeds 60 characters — a conservative ceiling under the 70-column value field.
+- **The value is the sanitised, folded target.** The `OBJECT` entry of `header.EditableKeys`
+  sanitises the value (§4.1) and refuses one that sanitises empty or exceeds 60 runes, a
+  conservative ceiling under the 70-column value field; the worker folds it onto the canonical
+  spelling first (§6.6). The card and the folder agree because both carry the sanitised value
+  (§9.3 step 5).
+- **The card is replaced, never inserted.** The writer refuses a frame without an `OBJECT` value
+  card, because a frame without a target is not classified as one, and refuses one with more than
+  one (pathological for ASIAIR frames; refuse rather than guess). A replacement leaves the header's
+  length, and so the file's, unchanged.
+- **The card's bytes are frozen.** `OBJECT  = '<target>'`, quoted with doubled-quote escaping,
+  blank-padded to the FITS fixed-format minimum of eight characters (the closing quote at column 20
+  or later), the card space-padded to 80 columns and any comment on the original card dropped. A
+  re-apply (§9.4) must reproduce an archive byte for byte, so `header.CanonicalCard` produces these
+  exact bytes for `OBJECT` (`TestBuildObjectCard_GoldenBytes`, `TestCanonicalCard_GoldenBytes`).
 
-The worker calls the writer through an injectable `rewriter` field, defaulting to
-`header.RewriteObject`, so a test can substitute a deliberately corrupting writer and prove the
-complement check refuses it; the real writer is deterministic and cannot be made to fail otherwise.
-
-Adding an `OBJECT` card to a frame that has none is out of scope: it can overflow the 2880-byte header
-block and shift every byte.
+The worker calls the writer through the injectable `rewriter` field, defaulting to
+`header.EditCards`, so a test can substitute a deliberately corrupting writer and prove the worker's
+own checks refuse it; the real writer is deterministic and cannot be made to fail otherwise.
 
 ### 9.2 The archive anchor and the overlay
 
@@ -1361,19 +1369,23 @@ A frame row carries two anchors, keyed on the copy each describes
   an overlay to `sha256` would rest on the device copy hashing to `sha256` for the frame's whole life,
   which a device-side revision falsifies.
 
-The **retarget overlay** is the audit record of a re-label:
+The **edit overlay** is the audit record of every header edit, a retarget included
+([header-edits §5](2026-11-02-header-edits.md)):
 
-- **`retarget_sha256`** — the hash the re-label produced. Non-empty means "this frame was
-  retargeted", and it is what the re-apply rule (§9.4) keys on.
-- **`retarget_from`** — the original target, kept across repeated retargets for display and audit.
-  `target` holds the corrected label.
+- **`edit_sha256`** — the hash the most recent edit or re-apply produced. Non-empty means "this
+  frame's archive is an edit of its device copy", and it is what the re-apply rule (§9.4) keys on.
+- **`header_edits`** — the ordered list of edits, one `{key, value, from}` entry per edited key. A
+  retarget is its `OBJECT` entry: `value` is the corrected, folded and sanitised target, and `from`
+  is the device copy's original target, kept across repeated retargets for display and audit.
+  `target` holds the corrected label, written from the re-classified edited header and asserted
+  equal to the entry.
 
 A retarget does not change the frame's state: it stays `verified`, or `deleted` for an archive whose
 device original is already gone. A re-label is not a lifecycle change, in the same way that missing
 and acknowledged are orthogonal columns rather than states.
 
 The overlay columns are written **only from explicit inputs** to the filing path, never carried by a
-sticky expression: a retarget or a re-apply passes the real values, and a genuinely new device file
+sticky expression: an edit or a re-apply passes the real values, and a genuinely new device file
 passes empty and so clears them — a stale overlay would otherwise point the archive-side checks at old
 content and hold the frame forever. The general row update (used to mark a frame deleted or held) does
 not list the overlay or archive columns and must not: a `deleted` retargeted archive keeps its overlay
@@ -1384,37 +1396,43 @@ After that the archive anchor catches later NAS-side drift exactly as it does fo
 
 ### 9.3 The retarget operation
 
-`rig.retargetFrame` runs on the rig's worker goroutine (§9.6), one frame per request:
+`rig.editFrame` with `key: "OBJECT"` runs on the rig's worker goroutine (§9.6), one frame per request:
 
 1. **Precondition guards.** Skip unless the state is `verified` or `deleted` and `dest_path` is set.
    Sanitise the requested target (skip if empty), fold it onto the canonical spelling (§6.6), and
    skip if the result equals the frame's current target — a no-op, including a case-only change.
+   Skip, too, while a supersede or re-file intent is open at `dest_path` (header-edits §8).
 2. **Admission.** Acquire a destination admission slot on the local site, sized at `archive_size`:
    the edited temp transiently adds one copy of the archive before the old copy is removed. The work
    touches only the NAS, whichever site the device is reached through.
 3. **Verify the archive before editing.** A cache-bypassing read of `dest_path` at `archive_size`
    must equal `archiveHash(f)`; on a mismatch refuse and log, never edit a drifted file (INV-3).
-4. **Rewrite to a staging temp** (`asiair-retarget-*.tmp` in the staging root, on the same volume as
+4. **Rewrite to a staging temp** (`asiair-edit-*.tmp` in the staging root, on the same volume as
    the destination so the rename works), through the injectable rewriter, with the folded target.
-5. **Faithfulness assertion.** The two complement digests must be equal, the temp's size must equal
-   `archive_size`, and the temp's header must re-classify to the sanitised target. The complement
-   equality is the load-bearing check (INV-4); the re-classification closes the one gap the complement
-   cannot see — garbage written inside the card window — and guarantees the folder the frame routes to
-   matches the label it carries. Any mismatch refuses before anything is committed.
-6. **Hash and file the temp to a destination path.** A cache-bypassing read of the temp must equal
-   the rewriter's `OutputSHA256`; otherwise a write fault between the streamed write and the durable
-   file would mint the archive anchor from corrupted bytes, and later authorise deleting the device
-   original against a corrupted archive. Then the temp is filed through the shared filing path,
+5. **Faithfulness proof.** The worker proves from the files at rest, with its own reads, that every
+   non-edited card and the data unit are byte-identical between the archive and the temp, that the
+   lengths agree, and that the edited card is the canonical one
+   ([header-edits §4.3](2026-11-02-header-edits.md); INV-4). The temp's header must also re-classify
+   to the sanitised target, which guarantees the folder the frame routes to matches the label it
+   carries. A cache-bypassing read of the temp must equal the writer's `OutputSHA256`; otherwise a
+   write fault between the streamed write and the durable file would mint the archive anchor from
+   corrupted bytes, and later authorise deleting the device original against a corrupted archive.
+   Any mismatch refuses before anything is committed.
+6. **File the temp to a destination path.** Every edit that includes `OBJECT` takes the filing path,
+   whether or not its route changes, because the target derives the night ordinal and the panel
+   columns, which the filing path writes and the in-place commit does not (header-edits §8). The
+   temp is filed through the shared filing path,
    updating the existing row: it re-reads the edited header, classifies it, resolves the night under
    the corrected target (§6.4), routes it, and claims a disambiguated name with an exclusive rename.
-   It passes `sha256` unchanged, the edited hash as the archive anchor and as `retarget_sha256`,
-   `retarget_from` as the first original target, the frame's state and `deleted_at` unchanged, and
+   It passes `sha256` unchanged, the edited hash as the archive anchor and as `edit_sha256`, the
+   edited length as `archive_size`, the edit list with the `OBJECT` entry's `from` kept as the first
+   original target, the frame's state and `deleted_at` unchanged, and
    `pulled_at` unchanged (the grace anchor is preserved). It is a local rename, so no transfer bytes
    are charged. The filed name derives from the archived basename. Every filing caller passes the
    device anchor explicitly, not only this one: omitting it at any site writes `sha256=''` and
    silently drops that frame out of deletion eligibility, which INV-1 and the delete tests guard.
 7. **Remove the old file — only after the commit is proven.** The row is re-read and must carry the
-   edited hash in `retarget_sha256`; an unproven commit leaves the old archive and the device original
+   edited hash in `edit_sha256`; an unproven commit leaves the old archive and the device original
    intact and reports failure. Only then is the old `dest_path` removed, and only if the row names a
    different path. A failed removal leaves a cosmetic orphan and is logged.
 
@@ -1442,11 +1460,11 @@ back to the old folder, orphan the edited archive and then release the device or
 wrong label. Rather than patch each path, one rule applies at the two places freshly pulled device
 bytes are filed against a prior row:
 
-> **Re-apply rule.** When the prior row carries a retarget overlay and the incoming file is the same
+> **Re-apply rule.** When the prior row carries an edit overlay and the incoming file is the same
 > exposure — its data-unit digest equals the row's `data_sha256` (when that digest is usable), **or**
-> its whole-file hash equals the row's `sha256` — rewrite the incoming file's `OBJECT` card to the
-> row's target before classification, prove the edit (§9.3 step 5 and the at-rest check of step 6,
-> anchored to the incoming file's own length), and file the edited file with the overlay preserved.
+> its whole-file hash equals the row's `sha256` — apply the row's whole `header_edits` list to the
+> incoming file before classification, prove the edit as §9.3 step 5 does, against the incoming file
+> and at the edited file's length, and file the edited file with the overlay preserved.
 > Only when **neither** arm holds is the content genuinely new: no re-apply, and the overlay resets.
 
 The data-digest arm is what makes the rule survive a device-side revision (H13): the ASIAIR rewriting
@@ -1457,13 +1475,15 @@ backfilled matches no incoming digest ([frame-lifecycle §11.3](2026-10-17-frame
 usability precondition stops two header-only files matching on the digest every empty data unit
 shares.
 
-`rig.reapplyRetargetIfNeeded` implements it, at the pull path's `classifyAndFile` (covering differ,
-re-adopt, and a database-loss pull with no prior row, which is simply a new frame) and in the restore
+`rig.reapplyEditsIfNeeded` implements it ([header-edits §6](2026-11-02-header-edits.md)), at the
+pull path's `classifyAndFile` (covering differ, re-adopt, and a database-loss pull with no prior row,
+which is simply a new frame) and in the restore
 path's read of the device source, which re-applies through the same helper before its own at-rest
 verify so the restored file is verified against the edited hash. On a re-apply the row's `sha256` is
 the hash of the bytes just pulled — the device anchor always describes the device copy in hand, so a
 revised device file never leaves a pre-revision anchor behind — while the archive anchor and
-`retarget_sha256` take the edited file's hash and `retarget_from` is kept.
+`edit_sha256` take the edited file's hash, `archive_size` takes its length (header-edits §7), and
+`header_edits` is kept.
 
 A retargeted frame is **not** excluded from the differ re-pull the way culled frames are: ASIAIR
 restarts its file counter every session, so a genuinely new frame can reuse a path at the same size,
@@ -1497,45 +1517,52 @@ checks is [delete-safety §3](2026-10-17-delete-safety.md).
 
 ### 9.6 Supervisor, manager and API
 
-Everything is per rig. The supervisor exposes `RetargetFrame(rig, frameID, target)` and
-`PreviewRetarget(rig, ids, target)`; the manager wraps each in its own timeout — 5 minutes for one
+Retargeting is the `OBJECT` case of the header edit, so its supervisor calls and endpoints are the
+edit's ([header-edits §9.1](2026-11-02-header-edits.md)); this section records the `OBJECT`-specific
+parts.
+
+Everything is per rig. The supervisor exposes `EditFrame(rig, frameID, key, value)` and
+`PreviewEdit(rig, ids, key, value)`; the manager wraps each in its own timeout — 5 minutes for one
 frame, which is a full read and write of the archive, and 10 seconds for a preview, which reads only
 the database.
 
-`RetargetFrame` is dispatched to the worker over a dedicated request/reply channel serviced **only in
-the `Run` select**, the between-cycles point where no admission slot is held and no phase is running.
-It is not serviced from the command drain the delete pass runs while it holds an admission slot:
-retarget acquires a slot of its own, so servicing it there would deadlock a single-slot
-configuration. Running at the select point serialises a retarget against the pull, restore and
-delete phases and the scan by construction, so a retarget never runs concurrently with a delete pass
-and two retargets of one frame are impossible. `PreviewRetarget` is read-only and runs on the caller's
+`EditFrame` is dispatched to the worker over a dedicated request/reply channel (`editReqs`)
+serviced **only in the `Run` select**, the between-cycles point where no admission slot is held and
+no phase is running. It is not serviced from the command drain the delete pass runs while it holds an
+admission slot: an edit acquires a slot of its own, so servicing it there would deadlock a
+single-slot configuration. Running at the select point serialises an edit against the pull, restore
+and delete phases and the scan by construction, so an edit never runs concurrently with a delete pass
+and two edits of one frame are impossible. `PreviewEdit` is read-only and runs on the caller's
 goroutine.
 
-| Endpoint | Behaviour |
+| Endpoint | Behaviour with `key: "OBJECT"` |
 |---|---|
-| `POST /api/rigs/{id}/retarget/preview` | Body `{ids, target}`. Returns one `RetargetPreview` per id: `frame_id`, `current_target`, `old_path`, `new_path` (the index-0 canonical path, night included; apply may disambiguate the filename), `night_approx`, `existing_spellings`, `eligible`, and `reason` — which also explains a read the preview could not make on an eligible row. |
-| `POST /api/rigs/{id}/retarget/apply` | Body `{ids, target}`. Calls `RetargetFrame` per id in the given order, without deduplicating, and streams one `RetargetResult` (`frame_id`, `status` of `retargeted`/`skipped`/`failed`, `reason`, `old_path`, `new_path`) per line as NDJSON, flushed per frame. A per-frame error becomes a failed line; an unknown rig before the first line is a 404. An empty id set answers an empty 200. |
+| `POST /api/rigs/{id}/edit/preview` | Body `{ids, key, value}`. Returns one `EditPreview` per id: `frame_id`, `current_value`, `old_path`, `new_path` (the index-0 canonical path, night included; apply may disambiguate the filename), `night_approx`, `existing_spellings`, `eligible`, and `reason` — which also explains a read the preview could not make on an eligible row. |
+| `POST /api/rigs/{id}/edit/apply` | Body `{ids, key, value}`. Calls `EditFrame` per id in the given order, without deduplicating, and streams one `EditResult` (`frame_id`, `status` of `edited`/`skipped`/`failed`, `reason`, `old_path`, `new_path`) per line as NDJSON, flushed per frame. A per-frame error becomes a failed line; an unknown rig before the first line is a 404. An empty id set answers an empty 200. |
 
-Both are write-guarded. The handler trims the target and rejects an empty one or one longer than 60
-bytes; the writer enforces its own 60-rune ceiling and the sanitise-empty refusal. The preview
-rebuilds a classification from the row's stored columns with the folded, sanitised target, resolves
-the night as §6.5 describes, routes it, and derives the canonical path the filing path would; it
+Both are write-guarded. The handler refuses a key off `header.EditableKeys`, trims the value and
+rejects an empty one and, for `OBJECT`, one longer than 60 bytes; the writer enforces its own
+60-rune ceiling and the sanitise-empty refusal. The preview rebuilds a classification from the
+row's stored columns with the folded, sanitised target, resolves the night as §6.5 describes, routes it, and derives the canonical path the filing path would; it
 reads neither the NAS nor the device. The sanitised target is deliberate and is the opposite of
 re-file's raw target (§8.2), for the same reason: each preview must route what its own apply routes.
 Retarget apply writes the sanitised label into `OBJECT` and routes the classification read back from
 the edited file, so routing the raw typed string would create a preview/apply divergence on inputs
 like `"Sadr/1-1"`, which sanitises to `Sadr_1-1` and is a panel on apply but would not be on
 preview. Its numeric presence flags are approximated from the stored values (a stored zero reads as
-absent, except `SET-TEMP`, whose absence is recorded); apply re-reads the real header.
+absent, except `SET-TEMP`, whose absence is recorded), an empty stored filter reads as an absent
+card, as re-file's does (§8.2); apply re-reads the real header.
 
 ### 9.7 The Tools page
 
-The Tools page hosts the retarget tool and re-file (§8.11).
+The Tools page hosts the **Edit header** card, whose `Target (OBJECT)` field is the retarget tool
+([header-edits §9.3](2026-11-02-header-edits.md)), and re-file (§8.11).
 
 - **Filter bar:** a date range over `date_obs` and a case-insensitive substring match on the target.
 - **Result list:** matching frames with checkboxes and select-all / deselect-all, showing target,
   filter, exposure, observing timestamp and current folder.
-- **Target input** with live validation and a **Preview** action showing `old path → new path` per
+- **Target input** (the field selector set to `Target (OBJECT)`) with live validation and a
+  **Preview** action showing `old path → new path` per
   selected frame, with the night caveat (§6.5) and the spelling report (§6.7).
 - **Apply** with a confirmation stating the count of eligible frames and the target, then a progress
   view driven by the streamed results. A selection spanning rigs is grouped by rig and issued as one
@@ -1559,8 +1586,10 @@ Known edges, stated as they stand:
   sibling row keeps naming the removed path; the scan then reads it as missing and it enters
   reconciliation ([library-reconciliation](2026-10-17-library-reconciliation.md)) while the frame's
   bytes survive at the retargeted path under the other row. Re-file, by contrast, moves every sharing
-  row together (§8.7).
-- **Stray temps are not swept.** A crash in the first window leaves an `asiair-retarget-*.tmp` in the
+  row together (§8.7), and so does a header edit committed in place, which advances every sharer to
+  the edited file in one transaction ([header-edits §8](2026-11-02-header-edits.md)). The edge stays
+  for every edit that takes the filing path, and every edit including `OBJECT` does.
+- **Stray temps are not swept.** A crash in the first window leaves an `asiair-edit-*.tmp` in the
   staging root, and the third window leaves an orphaned old archive. Neither is reclaimed
   automatically. No invariant depends on cleanup, and admission's disk reserve still accounts for the
   space.
@@ -1586,17 +1615,17 @@ prove FITS byte layout or the real delete state machine.
 | INV-1 | A retarget never mutates `sha256`. | `TestRetarget_PreservesOriginalSHA256` |
 | INV-2 | A retarget never reads-modifies-writes or deletes the device original; only the NAS copy is edited. | `TestRetarget_DeviceOriginalUntouched` |
 | INV-3 | A retarget refuses unless the current archive hashes to `archiveHash(f)`. | `TestRetarget_RefusesDriftedArchive` |
-| INV-4 | The edit changes only the `OBJECT` card's 80 bytes: the complement digests of source and edit are equal (every other card and the entire data unit byte-identical) and the size is unchanged; a data-unit-corrupting writer is refused at edit time and never committed to the overlay. | `TestRewriteObject_OnlyObjectCardChanges`, `TestRewriteObject_RefusesDuplicateObject`, `TestRewriteObject_ComplementCatchesDataCorruption`, `TestRetarget_RefusesCorruptingWriter` |
+| INV-4 | The edit changes only the `OBJECT` card's 80 bytes: every other card and the entire data unit are byte-identical between source and edit, proven by the worker's own reads of both files (header-edits §4.3), and the size is unchanged; a corrupting writer is refused at edit time and never committed to the overlay. | `TestEditCards_OnlyEditedCardsChange`, `TestEditCards_Refusals`, `TestEdit_RefusesCorruptingWriters`, `TestRetarget_RefusesCorruptingWriter` |
 | INV-5 | Delete, restore, differ, vanished-source and library auto-link verification compare the device side to `sha256` and every archive side to `archiveHash(f)`; device-original deletion still requires `deviceHash == sha256`. | `TestDelete_RetargetedThreeWay`, `TestDelete_RetargetedVanishedSource`, `TestDiffer_RetargetedNoFalseLost`, `TestRestoreOne_RetargetedPresentRecognized` |
 | INV-6 | Interruption is possible only at process restart (worker-goroutine execution), and every crash window leaves the frame recoverable — never a false device delete, never data loss. | `TestRetarget_CrashWindows` |
-| INV-7 | Retarget is re-runnable: a repeat edits from the current archive, updates `retarget_sha256`, and `retarget_from` keeps the first original target. | `TestRetarget_Idempotent_RetargetFromStable` |
-| INV-8 | Any re-pull of a retargeted frame's device bytes (differ, deleted re-adopt, restore) re-applies the edit and files with the overlay; it never files an original-header archive into a retargeted folder nor reverts the label. | `TestReapplyRetarget_OnDifferJitter`, `TestReapplyRetarget_OnDeletedReadopt`, `TestRestore_ReappliesRetarget` |
+| INV-7 | Retarget is re-runnable: a repeat edits from the current archive, updates `edit_sha256`, and the `OBJECT` entry of `header_edits` keeps the first original target as its `from`. | `TestRetarget_Idempotent_RetargetFromStable` |
+| INV-8 | Any re-pull of a retargeted frame's device bytes (differ, deleted re-adopt, restore) re-applies the edit and files with the overlay; it never files an original-header archive into a retargeted folder nor reverts the label. | `TestReapplyEdits_OnDifferJitter`, `TestReapplyEdits_OnDeletedReadopt`, `TestRestore_ReappliesRetarget` |
 | INV-9 | Retargeting is restricted to `verified` or `deleted` frames with a single `OBJECT` card and a `dest_path`; a `deleted` frame stays `deleted`. | `TestRetarget_ScopeGuards`, `TestRetarget_DeletedStaysDeleted` |
 | INV-10 | The overlay resets **only** when re-pulled content is genuinely new — matching neither the row's `sha256` nor its `data_sha256`; an identical re-pull and a device-side revision of the same exposure both preserve it. | `TestDiffer_ResetsOverlayOnNewContent`, `TestDiffer_PreservesOverlayOnIdenticalContent` |
 
 ## 10. Invariants INV-M1–INV-M11
 
-INV-M1 comes first because it subsumes much of the rest: a reset retarget overlay, a resurrected
+INV-M1 comes first because it subsumes much of the rest: a reset edit overlay, a resurrected
 `deleted` frame and erased reconciliation marks are all violations of it, and one test asserting
 whole-row equality except `dest_path` catches every one and any future regression of the same shape.
 INV-M2 is second because its failure destroys data: every way a frame can end up marked missing leads,
@@ -1604,7 +1633,7 @@ one settle window later, to its device original being deleted against an archive
 
 | ID | Invariant | Test |
 |---|---|---|
-| INV-M1 | **A re-file writes `dest_path` and no other column.** State, hashes, the retarget overlay, `night` and every reconciliation mark are byte-equal across the move. | `TestRefileWritesOnlyDestPath` |
+| INV-M1 | **A re-file writes `dest_path` and no other column.** State, hashes, the edit overlay, `night` and every reconciliation mark are byte-equal across the move. | `TestRefileWritesOnlyDestPath` |
 | INV-M2 | **No re-file failure can lead to a device original being deleted.** An open intent is a deferral reason, so a frame mid-move is never deletion-eligible however the move failed — crash, commit failure or failed rename-back — and startup recovery resolves it without ever binding a row to a sibling's file. | `TestRefileNeverStrandsAFrame`, `TestRecoverRefileIntentChecksSourceFirst`, `TestRefileCommitFailureAlertsWhenRenameBackFails`, `TestRefileInFlightDefersDeletion`, `TestRefileCommitFailureNeverReleasesTheDeviceOriginal` |
 | INV-M3 | Re-file never alters a single byte of a frame's contents. | `TestRefileContentUnchanged`, `TestRefileRefusesCrossVolumeRename` |
 | INV-M4 | The mosaic template routes a frame only when `mosaic_detection` is on **and** the frame is a `LIGHT` whose transformed target parsed as a panel with row and column in 1–20; a mosaic-only token elsewhere quarantines rather than rendering verbatim. With detection off, routing is identical to routing without the feature for every config that names no mosaic-only token. | `TestRouteMosaicOnlyForParsedLightPanels`, `TestMosaicTokenOutsideMosaicTemplateQuarantines` |
@@ -1682,7 +1711,7 @@ The numbers are stable references; code and tests cite them as
 23. After switching to the mosaic template, preview groups the panel directories and apply moves every
     frame, leaving `dest_path` correct and the files readable at their new paths.
 24. A re-filed row differs from its pre-move self in `dest_path` and nothing else — `state`,
-    `deleted_at`, `sha256`, `retarget_sha256`, `retarget_from`, `night`, `missing_seen_at`,
+    `deleted_at`, `sha256`, `edit_sha256`, `header_edits`, `night`, `missing_seen_at`,
     `missing_acked_at` and `restore_requested_at` are byte-equal (asserted over the whole row, with the
     solver's own columns excluded or the solver disabled, since it writes them from its own goroutine).
     This is INV-M1.
@@ -1770,8 +1799,8 @@ The night-numbering alternatives are in §6.10 and the re-file crash-safety alte
 | Overwrite the device anchor with the post-edit hash | The untouched device copy would then hash to a value that no longer equals `sha256`: every re-pull would read as different content, and the culled drain and three-way check would hold the frame permanently, so the device original could never be released. |
 | A `renamed` frame state | A retargeted frame is still verified and archived. A state would force every consumer — eligibility, the safe-on-NAS checks, the backlog UI, dismiss, restore — to learn it; orthogonal columns already model the analogous missing and acknowledged facts. |
 | Route retargeted frames through the culled path | The archive is not absent; it exists at a path of its own. Forcing it through the absent-frame path means a fake missing mark and fighting the path-nulling drain. The anchor split preserves the right insight — the device anchor authorises the device delete — without hijacking that plumbing. |
-| Reverse the edit at delete time to reconstruct the original digest | Needs the exact original card bytes and a re-edit on every delete pass, with no safety gain: a buggy edit would corrupt the archive and the reconstruction identically. The edit-time complement check catches a corrupting writer once, before anything commits. |
+| Reverse the edit at delete time to reconstruct the original digest | Needs the exact original card bytes and a re-edit on every delete pass, with no safety gain: a buggy edit would corrupt the archive and the reconstruction identically. The edit-time faithfulness proof catches a corrupting writer once, before anything commits. |
 | Rename in place, then move | Needs an atomic replace that `localfs` lacks and SMB does not provide, and the intermediate window lets the scan see the old path missing and, after the settle window, release the device original on a false cull. |
 | Move the file only, leaving `OBJECT` untouched | Leaves the archived file's `OBJECT` contradicting the folder it sits in, misleading every tool that groups by `OBJECT`. |
-| Add an `OBJECT` card to frames that lack one | Can overflow the 2880-byte header block and shift every byte. |
+| Add an `OBJECT` card to frames that lack one | A frame without an `OBJECT` card is not classified as a target, so there is no label to correct. The writer can insert a card (header-edits §4.1), but the `OBJECT` allowlist entry does not permit it (header-edits §3). |
 | Exclude retargeted frames from the differ re-pull | ASIAIR reuses paths at the same size across sessions, so a size-only skip would strand genuinely new frames. The re-apply rule handles both cases (§9.4). |

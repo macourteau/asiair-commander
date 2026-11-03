@@ -504,7 +504,7 @@ func (w *Worker) deleteOne(ctx context.Context, t hashTarget, ms *mountedSession
 
 	if deviceHash != f.SHA256 || nasHash != archiveHash(f) {
 		// Device side stays f.SHA256 (the untouched original); the archive side uses
-		// archiveHash so a retargeted NAS copy verifies against retarget_sha256
+		// archiveHash so a retargeted NAS copy verifies against edit_sha256
 		// (design routing-and-filing §9.5).
 		w.holdFrame(ctx, f, model.HoldThreeWayMismatch, "delete-pass three-way check failed (device/NAS/recorded mismatch)")
 		return
@@ -788,7 +788,7 @@ func (w *Worker) handleVanishedSource(ctx context.Context, f model.Frame) {
 	}
 	if nasHash != archiveHash(f) {
 		// Present-but-corrupt: a genuine integrity problem, not routine cleanup. Archive
-		// side, so archiveHash (retarget_sha256 for a retargeted copy) (design
+		// side, so archiveHash (edit_sha256 for a retargeted copy) (design
 		// routing-and-filing §9.5).
 		w.metrics.RecordFrameLost(w.profileID, metrics.LostNASCorrupt)
 		w.alertFrameLost(ctx, &f, "source vanished and NAS copy is corrupt (doubly-vanished)", model.SeverityCritical)
@@ -1117,14 +1117,15 @@ func (w *Worker) readRestoreSource(cfg *model.Config, ms *mountedSession, c mode
 		revised:       revisedExposure(streamHash, streamData, c),
 	}
 
-	// The device stream carries the ORIGINAL OBJECT (the device is never touched), so
-	// a retargeted frame's restored NAS copy must re-apply the edit before it lands,
-	// else it reverts the label AND answers no archive expectation. The re-apply owns
-	// its own faithfulness proof and its own at-rest read-back, both anchored to the
-	// file in hand — which is what lets it prove a revision the device has grown by a
-	// header block, where the row's recorded archive length would refuse the edit with
-	// "edited size != original".
-	editPath, editHash, rerr := w.reapplyRetargetIfNeeded(cfg, tmpPath, streamHash, streamData, n, &c)
+	// The device stream carries the device copy's ORIGINAL header (the device is
+	// never touched), so an edited frame's restored NAS copy must re-apply its edits
+	// before it lands, else it reverts them AND answers no archive expectation. The
+	// re-apply owns its own faithfulness proof and its own at-rest read-back, both
+	// anchored to the file in hand — which is what lets it prove a revision the
+	// device has grown by a header block. The archive length is the re-applied
+	// file's, which an insertion grows past the device length (design header-edits
+	// §7); the candidate match, the rename-race verify and the commit all read at it.
+	editPath, editHash, editSize, rerr := w.reapplyEditsIfNeeded(cfg, tmpPath, streamHash, streamData, n, &c)
 	if rerr != nil {
 		return nil, fmt.Errorf("restore re-apply: %w", rerr)
 	}
@@ -1132,6 +1133,7 @@ func (w *Worker) readRestoreSource(cfg *model.Config, ms *mountedSession, c mode
 		*temps = append(*temps, editPath)
 		src.path = editPath
 		src.archiveSHA256 = editHash
+		src.archiveSize = editSize
 		return src, nil
 	}
 
@@ -1207,8 +1209,8 @@ func (w *Worker) commitRestore(ctx context.Context, f model.Frame, src *restoreS
 		// The overlay is an audit record of what the archive file holds and this write
 		// rewrote that file, so the record follows it. The store applies it only to a
 		// row that already carries one.
-		RetargetSHA256: src.archiveSHA256,
-		State:          provenCommitState(src.row.State),
+		EditSHA256: src.archiveSHA256,
+		State:      provenCommitState(src.row.State),
 		// The grace clock restarts because the device copy has just been read afresh:
 		// a restore writes an archive copy from device bytes read once, so the window
 		// restarts before that original becomes deletable.

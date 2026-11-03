@@ -1,5 +1,5 @@
 /*
- * Tools page — frame retargeting (design routing-and-filing §9.7),
+ * Tools page — header edits (design header-edits §9.3),
  * re-file (design routing-and-filing §8.11) and device files
  * (design device-file-browser). Built from the shared
  * surfaces.css toolbar/notice/pager classes; this file carries only what's
@@ -20,49 +20,52 @@
   opacity: 0.5;
 }
 
-/* ---- Retarget preview --------------------------------------------------- */
-.retarget-preview {
+/* ---- Edit header preview ------------------------------------------------ */
+.header-edit-preview {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-3);
 }
-.retarget-preview__item {
+.header-edit-preview__item {
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-2);
 }
-.retarget-preview__item--ineligible {
+.header-edit-preview__item--ineligible {
   border-color: var(--problem-border);
   background: var(--problem-tint);
 }
-.retarget-preview__head {
+.header-edit-preview__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
-.retarget-preview__paths {
+.header-edit-preview__paths {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-.retarget-preview__paths svg {
+.header-edit-preview__paths svg {
   flex: none;
   color: var(--text-faint);
 }
+.header-edit-preview__warning {
+  margin-top: var(--space-2);
+}
 
 /* ---- Apply progress ------------------------------------------------------ */
-.retarget-progress {
+.header-edit-progress {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
-.retarget-progress__item {
+.header-edit-progress__item {
   display: flex;
   align-items: center;
   gap: var(--space-3);

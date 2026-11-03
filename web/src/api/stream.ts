@@ -1,8 +1,8 @@
 /**
  * The plumbing shared by the endpoints that can't go through client.ts's
- * `request()`: the Tools page's retarget and re-file runs and the File browser's runs answer with
- * streamed NDJSON rather than one JSON body, so they need their own fetch and an
- * incremental line reader. Their previews sit here too, so a caller sees the same
+ * `request()`: the Tools page's header-edit and re-file runs and the File
+ * browser's runs answer with streamed NDJSON rather than one JSON body, so they
+ * need their own fetch and an incremental line reader. Their previews sit here too, so a caller sees the same
  * ApiError — message, `problems`, `code` — whichever door it came through.
  *
  * The upload's staging request is here too, as an XMLHttpRequest: `fetch` reports

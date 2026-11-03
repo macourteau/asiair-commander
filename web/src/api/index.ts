@@ -18,7 +18,7 @@ export {
   type ForgetChallenge,
   type ForgetScope,
 } from "./client";
-export { previewRetarget, applyRetarget } from "./retarget";
+export { previewEdit, applyEdit } from "./headerEdit";
 export { previewRefile, applyRefile } from "./refile";
 export {
   listDeviceFiles,

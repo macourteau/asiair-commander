@@ -150,7 +150,7 @@ func TestFiledSamplesUnderRootCarriesTheArchiveAnchors(t *testing.T) {
 
 	// A retargeted filed frame under /lib.
 	rt := &model.Frame{RigID: "rig-s", SourceShare: "Udisk", SourcePath: "rt.fit",
-		SHA256: "orig", RetargetSHA256: "arch", RetargetFrom: "Moon",
+		SHA256: "orig", EditSHA256: "arch", HeaderEdits: objectEdits("M31", "Moon"),
 		ArchiveSHA256: "arch", ArchiveSize: 12,
 		Size: 10, Mtime: 1, State: model.StateVerified, DestPath: "/lib/M31/rt.fit"}
 	if err := s.UpsertFrame(ctx, rt); err != nil {
@@ -175,13 +175,13 @@ func TestFiledSamplesUnderRootCarriesTheArchiveAnchors(t *testing.T) {
 	if got := byDest["/lib/M31/rt.fit"]; got.ArchiveSHA256 != "arch" || got.ArchiveSize != 12 {
 		t.Fatalf("retargeted sample archive anchors: sha=%q size=%d, want arch/12", got.ArchiveSHA256, got.ArchiveSize)
 	}
-	if got := byDest["/lib/M31/rt.fit"]; got.RetargetSHA256 != "arch" || got.SHA256 != "orig" {
-		t.Fatalf("retargeted sample: sha=%q retarget=%q, want orig/arch", got.SHA256, got.RetargetSHA256)
+	if got := byDest["/lib/M31/rt.fit"]; got.EditSHA256 != "arch" || got.SHA256 != "orig" {
+		t.Fatalf("retargeted sample: sha=%q retarget=%q, want orig/arch", got.SHA256, got.EditSHA256)
 	}
 	if got := byDest["/lib/M31/plain.fit"]; got.ArchiveSHA256 != "phash" || got.ArchiveSize != 10 {
 		t.Fatalf("plain sample archive anchors: sha=%q size=%d, want phash/10", got.ArchiveSHA256, got.ArchiveSize)
 	}
-	if got := byDest["/lib/M31/plain.fit"]; got.RetargetSHA256 != "" {
-		t.Fatalf("plain sample must have empty overlay, got %q", got.RetargetSHA256)
+	if got := byDest["/lib/M31/plain.fit"]; got.EditSHA256 != "" {
+		t.Fatalf("plain sample must have empty overlay, got %q", got.EditSHA256)
 	}
 }

@@ -47,7 +47,7 @@ export {
   frameStateView,
   missingFrameView,
   missingWarningView,
-  retargetResultView,
+  editResultView,
   severityView,
   type Tone,
   type StatusView,

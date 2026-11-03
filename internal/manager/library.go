@@ -29,8 +29,8 @@ type worker interface {
 	AcknowledgeMissingIDs(ctx context.Context, dir string, ids []int64) (int, error)
 	ForgetFrame(ctx context.Context, frameID int64) error
 	ForgetLeftovers(ctx context.Context, dir string, olderThanDays int, ids []int64) (int, error)
-	RetargetFrame(ctx context.Context, frameID int64, newTarget string) (model.RetargetResult, error)
-	PreviewRetarget(ctx context.Context, ids []int64, newTarget string) ([]model.RetargetPreview, error)
+	EditFrame(ctx context.Context, frameID int64, key, value string) (model.EditResult, error)
+	PreviewEdit(ctx context.Context, ids []int64, key, value string) ([]model.EditPreview, error)
 	PreviewRefile(ctx context.Context, scope string) (model.RefilePreview, error)
 	RefileGroup(ctx context.Context, wantDir string, frameIDs []int64) ([]model.RefileResult, model.RefileSummary, error)
 }
@@ -132,34 +132,37 @@ func (m *Manager) ForgetLeftovers(rigID, dir string, olderThanDays int, ids []in
 	return w.ForgetLeftovers(ctx, dir, olderThanDays, ids)
 }
 
-// RetargetFrame re-labels one frame to newTarget, moving its archive to the new
-// path. One frame is a ~116 MB read+write, so the timeout is generous — the HTTP
+// EditFrame sets one header card of one frame's archive (design header-edits
+// §9.1). One frame is a ~116 MB read+write, so the timeout is generous — the HTTP
 // handler streams these one at a time and shows live progress, so a slow frame does
-// not stall the whole batch behind a short deadline.
-func (m *Manager) RetargetFrame(rigID string, frameID int64, newTarget string) (model.RetargetResult, error) {
+// not stall the whole batch behind a short deadline. The deadline also covers the
+// wait for the request to reach the worker between cycles and for the edit's own
+// admission slot, which it takes on the local site like any NAS write and which a
+// busy pull can hold; a frame that times out there is reported failed, untouched.
+func (m *Manager) EditFrame(rigID string, frameID int64, key, value string) (model.EditResult, error) {
 	w, err := m.workerFor(rigID)
 	if err != nil {
-		return model.RetargetResult{}, err
+		return model.EditResult{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	return w.RetargetFrame(ctx, frameID, newTarget)
+	return w.EditFrame(ctx, frameID, key, value)
 }
 
-// PreviewRetarget projects where each frame would move under newTarget, without any
-// NAS/device I/O, so the usual short timeout suffices.
-func (m *Manager) PreviewRetarget(rigID string, ids []int64, newTarget string) ([]model.RetargetPreview, error) {
+// PreviewEdit projects what setting key to value would do to each frame, without
+// any NAS/device I/O, so the usual short timeout suffices.
+func (m *Manager) PreviewEdit(rigID string, ids []int64, key, value string) ([]model.EditPreview, error) {
 	w, err := m.workerFor(rigID)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return w.PreviewRetarget(ctx, ids, newTarget)
+	return w.PreviewEdit(ctx, ids, key, value)
 }
 
 // refilePreviewTimeout bounds a re-file preview. It is longer than the 10 s the
-// retarget preview gets because it is a different shape of work: that one projects
+// edit preview gets because it is a different shape of work: that one projects
 // a hand-picked id list in memory, while this one scans every eligible row of the
 // library and issues one ReadDir per directory the migration would vacate — on a
 // network mount. It is only a backstop; the operator's own cancellation arrives

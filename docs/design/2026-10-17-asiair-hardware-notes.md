@@ -538,6 +538,14 @@ header alone is a few KB, which is why classification reads only the leading blo
 local copy (§11.1). The ASIAIR's in-place revision edits only the header, so the data unit is
 the exposure's identity (H13).
 
+Frames written without a filter wheel — flats and lights from a mono camera with none, and a
+one-shot-colour camera's flats — carry no `FILTER` card and a two-block header of 37 to 40 cards
+including `END`, with every byte after `END` a blank. Their last block therefore has 32 to 35 free
+slots, so a card inserted before `END` leaves the file's length unchanged
+([header-edits §4.1](2026-11-02-header-edits.md)). Their header carries the cards §8.1 lists plus
+`EXTEND`, two `COMMENT` cards, `BZERO`/`BSCALE`, `XORGSUBF`/`YORGSUBF`, `EGAIN`, `CCDXBIN`/`CCDYBIN`,
+`GUIDECAM`, `ROTATOR` and, where the producer has them, `FOCUSPOS` and the site cards.
+
 ## 9. SMB1 client behaviours the device forces
 
 Commander talks to the device through the public module `github.com/macourteau/smb1client`,

@@ -62,9 +62,10 @@ an exact-count integration test, not a smoke test.
 each recording the decision and its rejected alternatives; significant work gets one before
 code. The set: `overview`, `architecture`, `frame-lifecycle`, `delete-safety`,
 `device-identity-and-media`, `library-reconciliation`, `routing-and-filing`, `remote-sites`,
-`device-file-browser`, `asiair-hardware-notes`, `features`. Code comments cite `design <topic>
-§N.N` (the filename without date and `.md`); Markdown elsewhere links the path plus §. Invariant
-ids keep their values; I-series, AC and bare-number series are always qualified by their doc.
+`device-file-browser`, `asiair-hardware-notes`, `features`, `header-edits`. Code comments cite
+`design <topic> §N.N` (the filename without date and `.md`); Markdown elsewhere links the path
+plus §. Invariant ids keep their values; I-series, AC and bare-number series are always qualified
+by their doc.
 
 ## Verify before pushing
 

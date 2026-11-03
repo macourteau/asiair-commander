@@ -536,7 +536,7 @@ series rather than a site label on the per-rig series. The per-remote series are
 - Each remote site has one transfer slot of its own, in place of the global concurrency cap
   (`max_concurrent_transfers`, [architecture §3.4](2026-10-17-architecture.md)), and a remote
   rig's deletes and restores take that slot as well as its pulls.
-- NAS-only work (retarget) is admitted as local work whatever the rig's site.
+- NAS-only work (a header edit, retarget included) is admitted as local work whatever the rig's site.
 - The disk-reserve check and its accounting of bytes in flight stay one gate shared by every rig
   on every site.
 - `Acquire` receives the requester (the rig and its site), and a pluggable admission policy picks
@@ -908,7 +908,7 @@ against the Samba NT1 container through a real tailcat tunnel with a local DERP 
 22. Each remote site admits one transfer at a time, pull, delete or restore, outside the global
     cap, while every rig's transfers count against the one disk reserve; with a bandwidth cap set,
     reads on a remote site's connections average no more than the cap, and the local site is never
-    throttled; a remote rig's retarget is admitted as local work —
+    throttled; a remote rig's header edit is admitted as local work —
     `TestAdmissionPolicyPerRemoteSlot`, `TestSiteRateLimit` (§9).
 23. For each remote state, a rig reached through it shows the rig card and raises the alerts §10
     gives for that remote state, and a rig's own offline state and alert apply only while its

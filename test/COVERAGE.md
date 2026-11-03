@@ -58,29 +58,49 @@ archive-side hash comparison; the device is never modified.
 | # | Invariant | Test(s) | Package |
 |---|---|---|---|
 | INV-1 | A retarget never mutates `sha256`. | `TestRetarget_PreservesOriginalSHA256` | `internal/rig` |
-| INV-2 | A retarget never modifies/deletes the device original; only the NAS copy is edited. | `TestRetarget_DeviceOriginalUntouched` (asserts zero mutating device-fake calls; device bytes still hash to `sha256`) | `internal/rig` |
+| INV-2 | A retarget never reads-modifies-writes or deletes the device original; only the NAS copy is edited. | `TestRetarget_DeviceOriginalUntouched` | `internal/rig` |
 | INV-3 | A retarget refuses unless the current archive hashes to `archiveHash(f)`. | `TestRetarget_RefusesDriftedArchive` | `internal/rig` |
-| INV-4 | The edit changes only the OBJECT card; complement digests of source and edit are equal; a data-unit-corrupting writer is refused and never committed to `retarget_sha256`. | `TestRewriteObject_OnlyObjectCardChanges`, `TestRewriteObject_RefusesDuplicateObject`, `TestRewriteObject_ComplementCatchesDataCorruption` (writer level); `TestRetarget_RefusesCorruptingWriter` (retarget level, via the injectable `rewriter` seam) | `internal/header`, `internal/rig` |
-| INV-5 | Delete/restore/differ/vanished verification compares the device side to `sha256` and every archive side to `archiveHash(f)`; device-original deletion still requires `deviceHash == sha256`. | `TestDelete_RetargetedThreeWay`, `TestDelete_RetargetedVanishedSource`, `TestDiffer_RetargetedNoFalseLost`, `TestRestoreOne_RetargetedPresentRecognized` | `internal/rig` |
-| INV-6 | Interruption is only possible at process restart; every crash window leaves the frame recoverable — never a false device delete, never data loss. | `TestRetarget_CrashWindows` (subtests: after-rename-before-commit, after-commit-before-old-removal; each runs a delete pass and asserts no false `frame_lost` and the pointed-at archive survives). Uses the test-only `crashAfterRename`/`RemoveErr` seams. | `internal/rig` |
-| INV-7 | Retarget is re-runnable; a repeat edits from the current archive, updates `retarget_sha256`, and `retarget_from` preserves the first original target. | `TestRetarget_Idempotent_RetargetFromStable` | `internal/rig` |
-| INV-8 | ANY re-pull of a retargeted frame's original device bytes (differ, deleted-readopt, restore) re-applies the edit and files with `retarget_sha256`; it never files an original-header archive into a retargeted folder nor reverts the label. | `TestReapplyRetarget_OnDifferJitter`, `TestReapplyRetarget_OnDeletedReadopt`, `TestRestore_ReappliesRetarget` | `internal/rig` |
-| INV-9 | Retargeting is restricted to `verified`/`deleted` frames with a single OBJECT card and a `dest_path`; a `deleted` frame stays `deleted`. | `TestRetarget_ScopeGuards`, `TestRetarget_DeletedStaysDeleted` | `internal/rig` |
-| INV-10 | The overlay resets to NULL only when re-pulled content differs from `prior.SHA256`; an identical-content re-pull preserves it. | `TestDiffer_ResetsOverlayOnNewContent`, `TestDiffer_PreservesOverlayOnIdenticalContent` | `internal/rig` |
+| INV-4 | The edit changes only the `OBJECT` card's 80 bytes: every other card and the entire data unit are byte-identical between source and edit, proven by the worker's own reads of both files (header-edits §4.3), and the size is unchanged; a corrupting writer is refused at edit time and never committed to the overlay. | `TestEditCards_OnlyEditedCardsChange`, `TestEditCards_Refusals`, `TestEdit_RefusesCorruptingWriters`, `TestRetarget_RefusesCorruptingWriter` | `internal/header`, `internal/rig` |
+| INV-5 | Delete, restore, differ, vanished-source and library auto-link verification compare the device side to `sha256` and every archive side to `archiveHash(f)`; device-original deletion still requires `deviceHash == sha256`. | `TestDelete_RetargetedThreeWay`, `TestDelete_RetargetedVanishedSource`, `TestDiffer_RetargetedNoFalseLost`, `TestRestoreOne_RetargetedPresentRecognized` | `internal/rig` |
+| INV-6 | Interruption is possible only at process restart (worker-goroutine execution), and every crash window leaves the frame recoverable — never a false device delete, never data loss. | `TestRetarget_CrashWindows` | `internal/rig` |
+| INV-7 | Retarget is re-runnable: a repeat edits from the current archive, updates `edit_sha256`, and the `OBJECT` entry of `header_edits` keeps the first original target as its `from`. | `TestRetarget_Idempotent_RetargetFromStable` | `internal/rig` |
+| INV-8 | Any re-pull of a retargeted frame's device bytes (differ, deleted re-adopt, restore) re-applies the edit and files with the overlay; it never files an original-header archive into a retargeted folder nor reverts the label. | `TestReapplyEdits_OnDifferJitter`, `TestReapplyEdits_OnDeletedReadopt`, `TestRestore_ReappliesRetarget` | `internal/rig` |
+| INV-9 | Retargeting is restricted to `verified` or `deleted` frames with a single `OBJECT` card and a `dest_path`; a `deleted` frame stays `deleted`. | `TestRetarget_ScopeGuards`, `TestRetarget_DeletedStaysDeleted` | `internal/rig` |
+| INV-10 | The overlay resets **only** when re-pulled content is genuinely new — matching neither the row's `sha256` nor its `data_sha256`; an identical re-pull and a device-side revision of the same exposure both preserve it. | `TestDiffer_ResetsOverlayOnNewContent`, `TestDiffer_PreservesOverlayOnIdenticalContent` | `internal/rig` |
 
 ### Supporting coverage (not invariants, but load-bearing)
 
 | Area | Test(s) | Package |
 |---|---|---|
-| A fresh schema carries the overlay columns; overlay set/reset/set round-trip via `UpsertFrame`; `sha256` anchor preserved. | `TestFreshDBIsSchema10AndHasOverlayColumns`, `TestRetargetOverlaySetResetSet` | `internal/store` |
-| `FiledSamplesUnderRoot` carries the archive anchors, with `retarget_sha256` beside them. | `TestFiledSamplesUnderRootCarriesTheArchiveAnchors` | `internal/store` |
-| `parseBinningToken` inverse; preview projects the path without any I/O or night mutation. | `TestParseBinningToken`, `TestPreviewRetarget_ProjectsPathWithoutIO` | `internal/rig` |
-| HTTP: preview JSON projection; apply NDJSON streaming (order + ids); bad target → 400; unknown rig → 404. | `TestRetargetPreviewReturnsProjection`, `TestRetargetApplyStreamsNDJSON`, `TestRetargetBadTargetRejected`, `TestRetargetUnknownRig` | `internal/web` |
+| A fresh schema carries the overlay columns; overlay set/reset/set round-trip via `UpsertFrame`; `sha256` anchor preserved. | `TestFreshDBIsSchema12AndHasOverlayColumns`, `TestRetargetOverlaySetResetSet` | `internal/store` |
+| `FiledSamplesUnderRoot` carries the archive anchors, with `edit_sha256` beside them. | `TestFiledSamplesUnderRootCarriesTheArchiveAnchors` | `internal/store` |
+| `parseBinningToken` inverse; preview projects the path without any I/O or night mutation. | `TestParseBinningToken`, `TestPreviewEdit_ProjectsPathWithoutIO` | `internal/rig` |
+| HTTP: preview JSON projection; apply NDJSON streaming (order + ids); a key off the allowlist or a bad value → 400; unknown rig → 404; the `/retarget/*` routes are gone. | `TestEditPreviewReturnsProjection`, `TestEditApplyStreamsNDJSON`, `TestEditAPI_RejectsBadInput`, `TestEditUnknownRig`, `TestRetargetEndpointsRemoved` | `internal/web` |
 
 ### Test-only seams (nil/zero in production)
-- `Worker.rewriter` — injectable FITS writer (INV-4 corrupting-writer test).
+- `Worker.rewriter` — injectable FITS writer, `header.EditCards`' signature (INV-4 and HE-3 corrupting-writer tests).
+- `Worker.crashAfterSupersedeStep` — consulted after each of the in-place edit's four steps (HE-10 crash windows).
 - `Worker.crashAfterRename` — consulted in `fileFrom` after a successful rename, before commit (INV-6 window a).
 - `device.Fake.Mutations()` — mutation counter on the device fake (INV-2).
+
+## Header edits — `docs/design/2026-11-02-header-edits.md` §11
+
+The allowlisted card writer, the worker-side proof, the edit overlay, the archive length and the in-place supersede commit. Byte-level and delete-path invariants run on fitstest fixtures, including one whose `END` fills its block.
+
+| # | Invariant | Test(s) | Package |
+|---|---|---|---|
+| HE-1 | No edit path mutates `sha256` or `size`, or reads-modifies-writes or deletes the device original. | `TestEdit_PreservesDeviceAnchor`, `TestEdit_DeviceOriginalUntouched` | `internal/rig` |
+| HE-2 | An edit refuses unless the archive hashes to `archiveHash(f)` at `archive_size`. | `TestEdit_RefusesDriftedArchive` | `internal/rig` |
+| HE-3 | Every non-edited card is byte-identical and in its order, and the data unit is byte-identical, between source and edit, proven by the worker's own reads; a writer that drops, reorders or alters a card or a card's comment, alters a data byte, mis-reports its growth, or writes non-blank padding is refused before commit even when its own digests agree. | `TestEditCards_OnlyEditedCardsChange`, `TestEdit_RefusesCorruptingWriters` | `internal/header`, `internal/rig` |
+| HE-4 | An insertion with a free slot leaves the length unchanged; an insertion into a full last block grows the file by exactly 2880 bytes and leaves `data_sha256` unchanged. | `TestEditCards_InsertWithFreeSlot`, `TestEditCards_InsertGrowsFullBlock` | `internal/header` |
+| HE-5 | The `OBJECT` canonical card is byte-identical to the frozen retarget card. | `TestBuildObjectCard_GoldenBytes` | `internal/header` |
+| HE-6 | `archive_size` equals the archive file's length after every edit, re-apply, restore and supersede; no archive-side comparison of a grown file reads a prefix. | `TestEdit_GrownArchiveSizeRecorded`, `TestReapplyEdits_GrownSizeOnDiffer`, `TestRestore_ReappliesGrownEdit`, `TestSupersede_GrownEditSize` | `internal/rig` |
+| HE-7 | The delete pass's three-way check passes for an edited, grown archive, and releases the device original only when the device copy hashes to `sha256`. | `TestDelete_EditedGrownThreeWay` | `internal/rig` |
+| HE-8 | Re-applying the whole edit list to a byte-identical device copy reproduces the archive byte for byte, for an edit list built in several steps. | `TestReapplyEdits_ReproducesMultiStepArchive` | `internal/rig` |
+| HE-9 | The overlay resets only for genuinely new content; an identical re-pull and a device-side revision both preserve and re-apply it. | `TestDiffer_ResetsOverlayOnNewContent`, `TestDiffer_PreservesOverlayOnIdenticalContent`, `TestEditedFrameSurvivesARevision` | `internal/rig` |
+| HE-10 | A `FILTER` edit whose route is unchanged supersedes the archive in place: the frame keeps its path, no `rot_clash` is raised, every sharer is committed to the edited anchors and overlay, and `state`, `pulled_at`, `delete_defer_count` and the device anchor are unchanged; it refuses over an open intent at its path and reports `failed` when no row committed; a crash after any of the four steps recovers to one consistent state, never deletion-eligible against a file that does not hold the row's bytes. An edit including `OBJECT` always takes the filing path. | `TestEdit_InPlaceKeepsPath`, `TestEdit_InPlaceCommitsSharers`, `TestEdit_RefusesOpenIntent`, `TestEdit_InPlacePrunedRowFails`, `TestEdit_InPlaceCrashWindows`, `TestEdit_InPlaceCrashWindowsOnDeletedFrame`, `TestRecoverSupersedeIntent_EditKind`, `TestEdit_ObjectTakesFilingPath` | `internal/rig` |
+| HE-11 | The API and the writer refuse a key off the allowlist and a value outside its rule. | `TestEditCards_RefusesUnlistedKey`, `TestEditAPI_RejectsBadInput` | `internal/header`, `internal/web` |
+| HE-12 | The migration carries every retargeted row's overlay into `edit_sha256` and an `OBJECT` entry of `header_edits`, with `from` equal to the old `retarget_from`, and a supersede intent open across the upgrade recovers as a revision. | `TestMigrateHeaderEdits` | `internal/store` |
 
 ## Device clock sync — `docs/design/2026-10-17-features.md` §6
 
@@ -140,7 +160,7 @@ template-derived is persisted to go stale. The ledger's schema, key and scope do
 | A folder whose frames rows are gone yields a missed adoption — a mint — never a wrong one. | `TestPrunedFolderMintsRatherThanAdopts` | `internal/rig` |
 | A preview that cannot reach the ledger keeps its rows eligible, explains itself, and renders at the next ordinal the batch would take rather than at `NIGHT_0`. | `TestPreviewSurvivesAFailedNightRead` | `internal/rig` |
 | The spellings already filed in the resolved night folder are reported when they differ from the target as it will be written; a spelling in another night of the same prefix is not. | `TestPreviewReportsExistingSpellings` | `internal/rig` |
-| A reserved Windows name, a trailing dot and an illegal character stay eligible and retarget successfully, landing as `_CON`, `M31` and `NGC_7380`: `RewriteObject` sanitizes before writing the card. | `TestRetargetKeepsSanitizedTargetsEligible` | `internal/rig` |
+| A reserved Windows name, a trailing dot and an illegal character stay eligible and retarget successfully, landing as `_CON`, `M31` and `NGC_7380`: the `OBJECT` value rule sanitizes before the card is written. | `TestRetargetKeepsSanitizedTargetsEligible` | `internal/rig` |
 
 ### Test-only helpers
 - `nightCounterRows` (`internal/rig/retarget_test.go`) — the whole night ledger, read on the test's own handle. Nothing in production reads the table entire, so proving a preview left it byte-identical needs a test-only dump.

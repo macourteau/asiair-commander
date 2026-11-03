@@ -640,7 +640,7 @@ func TestPreviewRefileMosaicScope(t *testing.T) {
 	f := fileLight(t, h, refileSrc)
 	// Relabel the frame to a pane name through the production retarget path, so the
 	// stored target is one the mosaic parser accepts.
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "Sadr_1-1"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "Sadr_1-1"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget to a pane name: status=%q err=%v", res.Status, err)
 	}
 	// A second, non-pane frame that must stay out of the mosaic scope.
@@ -673,7 +673,7 @@ func TestPreviewRefileMosaicScope(t *testing.T) {
 }
 
 // TestPreviewRefileTreatsStoredScalarsAsPresent (design routing-and-filing AC29)
-// proves the two details that must NOT be copied from previewRetarget: a
+// proves the two details that must NOT be copied from the OBJECT edit preview: a
 // legitimate SET-TEMP 0 / GAIN 0 is routed as present rather than reported as an
 // unroutable frame, and each frame renders its STORED night rather than NIGHT_0.
 func TestPreviewRefileTreatsStoredScalarsAsPresent(t *testing.T) {
@@ -690,7 +690,7 @@ func TestPreviewRefileTreatsStoredScalarsAsPresent(t *testing.T) {
 		Gain: 0, SetTemp: 0, Exptime: 300, Binning: "Bin1",
 		DateObs: "2026-01-01T22:00:00Z", DestPath: filepath.Join(h.cfg.Roots.Cal, "old", "d.fit"),
 	}
-	// A light whose stored night is 7: previewRetarget passes Night 0, and copying
+	// A light whose stored night is 7: the OBJECT edit preview passes Night 0, and copying
 	// that here would render NIGHT_0 for every frame in the library.
 	light := &model.Frame{
 		RigID: "rig-01", SourceShare: emmc, SourcePath: "Autorun/Light/M31/Light_0001.fit",
@@ -1181,7 +1181,7 @@ func TestRefileVanishedRowIsNotRestored(t *testing.T) {
 // retargeted frame survives a re-file: archiveHash still resolves to the
 // overlay, the archive on disk still hashes to it, and the delete pass's
 // three-way check raises no delete_mismatch. Reusing the filing path would have
-// reset retarget_sha256 and held the frame.
+// reset edit_sha256 and held the frame.
 func TestRefileRetargetedFrameSurvives(t *testing.T) {
 	h := newHarness(t, emmc, header.New())
 	ctx := context.Background()
@@ -1190,11 +1190,11 @@ func TestRefileRetargetedFrameSurvives(t *testing.T) {
 	h.resolver.probeGUID, h.resolver.probeOK = "dev-guid", true
 
 	f := fileLight(t, h, refileSrc)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	before := mustGetFrame(t, h, f.ID)
-	if before.RetargetSHA256 == "" {
+	if before.EditSHA256 == "" {
 		t.Fatal("setup: expected a retarget overlay")
 	}
 
@@ -1203,8 +1203,8 @@ func TestRefileRetargetedFrameSurvives(t *testing.T) {
 	res := requireMoved(t, mustResults(t, h, g))
 
 	after := mustGetFrame(t, h, f.ID)
-	if after.RetargetSHA256 != before.RetargetSHA256 || after.SHA256 != before.SHA256 {
-		t.Fatalf("the overlay must survive the move: sha=%q retarget=%q", after.SHA256, after.RetargetSHA256)
+	if after.EditSHA256 != before.EditSHA256 || after.SHA256 != before.SHA256 {
+		t.Fatalf("the overlay must survive the move: sha=%q retarget=%q", after.SHA256, after.EditSHA256)
 	}
 	if hd := hashOnDisk(t, res.To); hd != archiveHash(after) {
 		t.Fatalf("the moved archive %q does not hash to archiveHash %q", hd, archiveHash(after))

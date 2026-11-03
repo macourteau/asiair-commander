@@ -32,8 +32,8 @@ func TestFrameColumnsRoundTripEveryColumn(t *testing.T) {
 		ArchiveSHA256:    "sha-archive",
 		ArchiveSize:      123_456_790,
 		DeleteDeferCount: 0, // UpsertFrame resets it; TestUpsertFrameResetsTheDeferralCounter owns that rule
-		RetargetSHA256:   "sha-overlay",
-		RetargetFrom:     "OldTarget",
+		EditSHA256:       "sha-overlay",
+		HeaderEdits:      objectEdits("Sadr_2-3", "OldTarget"),
 		FrameType:        "LIGHT",
 		Target:           "Sadr_2-3",
 		Filter:           "Ha",

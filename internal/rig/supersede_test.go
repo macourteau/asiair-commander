@@ -84,12 +84,12 @@ func stageRevision(t *testing.T, h *harness, f model.Frame, body []byte) superse
 		archiveSHA256: sha256hex(body),
 		archiveSize:   int64(len(body)),
 	}
-	if f.RetargetSHA256 != "" {
+	if f.EditSHA256 != "" {
 		// The overlay a caller with a retargeted row has already re-applied to body, which
 		// the primitive refuses to proceed without: the bytes staged here stand for the
 		// re-apply's output, and a caller that had re-applied nothing would be installing
 		// the device's original OBJECT card under a record claiming the edit.
-		a.retargetSHA256 = a.archiveSHA256
+		a.editSHA256 = a.archiveSHA256
 	}
 	return a
 }
@@ -150,8 +150,8 @@ func TestSupersedeClaimsTheNameAndCommits(t *testing.T) {
 	if got.State != model.StateVerified {
 		t.Fatalf("state=%s, want verified", got.State)
 	}
-	if got.RetargetSHA256 != "" || got.RetargetFrom != "" {
-		t.Fatalf("a plain supersede must not mint an overlay: sha=%q from=%q", got.RetargetSHA256, got.RetargetFrom)
+	if got.EditSHA256 != "" || objectFrom(got.HeaderEdits) != "" {
+		t.Fatalf("a plain supersede must not mint an overlay: sha=%q from=%q", got.EditSHA256, objectFrom(got.HeaderEdits))
 	}
 	if got.DestPath != before.DestPath {
 		t.Fatalf("the claim is of the row's OWN name: dest=%q, want %q", got.DestPath, before.DestPath)
@@ -291,11 +291,11 @@ func TestSupersedeRecoveryReAnchorsARetargetedFrame(t *testing.T) {
 	ctx := context.Background()
 	confirmDeleteIdentity(h)
 	f := fileLight(t, h, refileSrc)
-	if res, err := h.w.serviceRetarget(ctx, f.ID, "M31"); err != nil || res.Status != "retargeted" {
+	if res, err := h.w.serviceEdit(ctx, f.ID, "OBJECT", "M31"); err != nil || res.Status != "edited" {
 		t.Fatalf("retarget: status=%q err=%v", res.Status, err)
 	}
 	edited := mustGetFrame(t, h, f.ID)
-	if edited.RetargetSHA256 == "" {
+	if edited.EditSHA256 == "" {
 		t.Fatal("setup: the row must carry an overlay")
 	}
 
@@ -318,12 +318,12 @@ func TestSupersedeRecoveryReAnchorsARetargetedFrame(t *testing.T) {
 	recoverSupersedes(t, h)
 
 	got := mustGetFrame(t, h, f.ID)
-	if got.RetargetSHA256 == edited.RetargetSHA256 {
+	if got.EditSHA256 == edited.EditSHA256 {
 		t.Fatal("the audit record must not survive a rewrite of the file it describes")
 	}
-	if got.RetargetSHA256 != hashOnDisk(t, got.DestPath) {
-		t.Fatalf("retarget_sha256 = %q, want the committed file's hash %q",
-			got.RetargetSHA256, hashOnDisk(t, got.DestPath))
+	if got.EditSHA256 != hashOnDisk(t, got.DestPath) {
+		t.Fatalf("edit_sha256 = %q, want the committed file's hash %q",
+			got.EditSHA256, hashOnDisk(t, got.DestPath))
 	}
 	if got.ArchiveSHA256 != sha256hex(archiveBody) || got.ArchiveSize != int64(len(archiveBody)) {
 		t.Fatalf("the archive anchors must describe the edited copy: sha=%q size=%d", got.ArchiveSHA256, got.ArchiveSize)
@@ -331,8 +331,8 @@ func TestSupersedeRecoveryReAnchorsARetargetedFrame(t *testing.T) {
 	if got.SHA256 != sha256hex(deviceBody) || got.Size != int64(len(deviceBody)) {
 		t.Fatalf("the device anchors must describe the DEVICE copy: sha=%q size=%d", got.SHA256, got.Size)
 	}
-	if got.RetargetFrom != edited.RetargetFrom {
-		t.Fatalf("retarget_from records what the frame was labelled before, got %q", got.RetargetFrom)
+	if objectFrom(got.HeaderEdits) != objectFrom(edited.HeaderEdits) {
+		t.Fatalf("header_edits' OBJECT from records what the frame was labelled before, got %q", objectFrom(got.HeaderEdits))
 	}
 }
 

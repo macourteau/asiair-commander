@@ -45,7 +45,7 @@ const (
 )
 
 // previewRefile projects the whole migration for this rig from STORED columns, the
-// way previewRetarget does, so previewing a library is a database scan rather than
+// way the edit preview does, so previewing a library is a database scan rather than
 // a walk. The only disk access is one ReadDir per directory the migration would
 // vacate, which is what lets the preview name the directories it expects to
 // strand — bounded by group count, not frame count.
@@ -501,15 +501,15 @@ func refileRowRefusal(f model.Frame) string {
 // refileRouteInputs rebuilds one archived row's classification and routing options
 // from its STORED columns.
 //
-// Two details are load-bearing and deliberately differ from previewRetarget:
+// Two details are load-bearing and deliberately differ from the OBJECT edit preview (projectObjectEdit):
 //
-// The frame's stored night is passed through. previewRetarget passes Night: 0
+// The frame's stored night is passed through. projectObjectEdit passes Night: 0
 // because a preview must never assign an ordinal; every template in play here
 // contains NIGHT_<n>, so a zero would render NIGHT_0 for every frame and INV-M10
 // would then refuse them all. AssignNight is never called: it would mint a new
 // ordinal and strand the frame in a NIGHT_n its siblings do not share.
 //
-// Every stored scalar but SET-TEMP is treated as PRESENT. Presence is not
+// Every stored scalar but SET-TEMP and FILTER is treated as PRESENT. Presence is not
 // recoverable for them: UpsertFrame binds exptime, gain and offset raw, so a
 // legitimate zero is stored as 0 and never NULL. A != 0 test would report a
 // cooled camera's legitimate 0 as unroutable across a whole library. SET-TEMP
@@ -529,7 +529,13 @@ func (w *Worker) refileRouteInputs(cfg *model.Config, f *model.Frame) (model.Cla
 	// on this string, so a preview that transformed it differently from apply would
 	// disagree about whether a frame is in scope at all.
 	cls.Target, cls.TargetPresent = f.Target, true
-	cls.Filter, cls.FilterPresent = f.Filter, true
+	// FILTER alone is read back as absent when empty. The row stores an absent
+	// card as "", and classification leaves an absent card absent; a present-but-
+	// empty <FILTER> renders as a quarantine or a dangling separator where an
+	// absent one collapses (design routing-and-filing §3.4), so reading "" as
+	// present would route a filterless frame away from where its live pull filed
+	// it. The header-edit preview reads it the same way (design header-edits §9.1).
+	cls.Filter, cls.FilterPresent = f.Filter, f.Filter != ""
 	cls.Exptime, cls.ExptimePresent = f.Exptime, true
 	cls.SetTempC, cls.SetTempPresent = f.SetTemp, !f.SetTempAbsent
 	cls.Gain, cls.GainPresent = f.Gain, true

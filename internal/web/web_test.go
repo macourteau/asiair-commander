@@ -57,13 +57,15 @@ type fakeSupervisor struct {
 	// exercise the real store guard behind a bulk Forget confirm.
 	forgetApply func(rigID string, ids []int64) (int, error)
 
-	// Retarget: previews is returned verbatim by PreviewRetarget for a known rig;
-	// retargetErr, when non-nil, is returned per-frame by RetargetFrame; otherwise
-	// RetargetFrame reports a "retargeted" result. retargetIDs records the ids
-	// RetargetFrame was called with, in order.
-	previews    []model.RetargetPreview
-	retargetErr error
-	retargetIDs []int64
+	// Header edits: previews is returned verbatim by PreviewEdit for a known rig;
+	// editErr, when non-nil, is returned per-frame by EditFrame; otherwise EditFrame
+	// reports an "edited" result. editIDs records the ids EditFrame was called with,
+	// in order, and editKeys/editValues the key and value it received.
+	previews   []model.EditPreview
+	editErr    error
+	editIDs    []int64
+	editKeys   []string
+	editValues []string
 
 	// Re-file: refilePreview and refileResults/refileSummary are handed back for a
 	// known rig; refileErr, when non-nil, is returned instead. refileScope and
@@ -187,22 +189,24 @@ func (f *fakeSupervisor) ForgetLeftovers(id, dir string, olderThanDays int, ids 
 	}
 	return len(ids), nil
 }
-func (f *fakeSupervisor) RetargetFrame(id string, frameID int64, newTarget string) (model.RetargetResult, error) {
+func (f *fakeSupervisor) EditFrame(id string, frameID int64, key, value string) (model.EditResult, error) {
 	if !f.known[id] {
-		return model.RetargetResult{}, ErrRigNotFound
+		return model.EditResult{}, ErrRigNotFound
 	}
-	if f.retargetErr != nil {
-		return model.RetargetResult{}, f.retargetErr
+	if f.editErr != nil {
+		return model.EditResult{}, f.editErr
 	}
 	f.mu.Lock()
-	f.retargetIDs = append(f.retargetIDs, frameID)
+	f.editIDs = append(f.editIDs, frameID)
+	f.editKeys = append(f.editKeys, key)
+	f.editValues = append(f.editValues, value)
 	f.mu.Unlock()
-	return model.RetargetResult{
-		FrameID: frameID, Status: "retargeted",
-		OldPath: "/old/" + newTarget, NewPath: "/new/" + newTarget,
+	return model.EditResult{
+		FrameID: frameID, Status: "edited",
+		OldPath: "/old/" + value, NewPath: "/new/" + value,
 	}, nil
 }
-func (f *fakeSupervisor) PreviewRetarget(id string, ids []int64, newTarget string) ([]model.RetargetPreview, error) {
+func (f *fakeSupervisor) PreviewEdit(id string, ids []int64, key, value string) ([]model.EditPreview, error) {
 	if !f.known[id] {
 		return nil, ErrRigNotFound
 	}
