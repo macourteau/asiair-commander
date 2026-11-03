@@ -1593,9 +1593,6 @@ Known edges, stated as they stand:
   staging root, and the third window leaves an orphaned old archive. Neither is reclaimed
   automatically. No invariant depends on cleanup, and admission's disk reserve still accounts for the
   space.
-- **The target filters run in the browser.** The frame list reuses the cross-rig transfer-history
-  read, which has no target-substring or observing-date filter, so the Tools filters narrow the
-  loaded page only; a match on a later page is not shown until that page is loaded.
 - **Byte and rune limits differ.** The API caps the target at 60 bytes and the writer at 60 runes, so
   a multibyte target is refused at the API before it could reach the writer's limit; the two never
   disagree in the other direction.

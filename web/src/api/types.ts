@@ -740,6 +740,34 @@ export interface Config {
 
 // ---- REST envelopes & SSE event payloads ---------------------------------
 
+/** GET /api/frames/facets — the distinct FILTER and frame-type values in the
+ * transfer history, for the Find frames value pickers. */
+export interface HistoryFacets {
+  filters: string[];
+  frame_types: string[];
+}
+
+/** The Find frames filter parameters of GET /api/frames (design header-edits
+ * §9.4). Lists repeat their parameter; a `*_not` flag negates its filter. */
+export interface HistoryFilterParams {
+  rig?: string[];
+  rig_not?: 1;
+  target?: string;
+  path?: string;
+  filter?: string[];
+  filter_none?: 1;
+  filter_not?: 1;
+  type?: string[];
+  type_not?: 1;
+  /** DATE-OBS bounds, unix seconds, half-open [obs_from, obs_to). */
+  obs_from?: number;
+  obs_to?: number;
+  obs_not?: 1;
+  exp_op?: "lt" | "le" | "gt" | "ge" | "in" | "out";
+  exp_min?: number;
+  exp_max?: number;
+}
+
 export interface FramesPage {
   frames: Frame[];
   page: number;

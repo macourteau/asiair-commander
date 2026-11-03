@@ -1,0 +1,146 @@
+/*
+ * FilterBar — the Find frames chip filters (design header-edits §9.4): a row of
+ * chips, each opening its editor in a popover anchored below it.
+ */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.filter-chip,
+.filter-add {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.filter-chip {
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--accent-quiet);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.filter-chip--muted {
+  background: var(--surface-2);
+  border-style: dashed;
+  color: var(--text-muted);
+}
+.filter-chip--add {
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.filter-chip--add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.filter-chip__label,
+.filter-chip__remove {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 32px;
+}
+.filter-chip__label {
+  padding: 0 var(--space-1) 0 var(--space-3);
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filter-chip__remove {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+}
+.filter-chip__remove:hover {
+  color: var(--text);
+}
+.filter-chip button:focus-visible,
+.filter-chip--add:focus-visible,
+.filter-menu__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.filter-pop {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 20;
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+.filter-pop__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.filter-pop__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.filter-pop__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.filter-pop__check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  cursor: pointer;
+}
+.filter-pop__nums {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.filter-pop__nums .aac-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.filter-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: var(--space-1);
+}
+.filter-menu__item {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.filter-menu__item:hover {
+  background: var(--surface-2);
+}

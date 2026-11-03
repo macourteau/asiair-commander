@@ -9,6 +9,7 @@ import (
 
 	"github.com/macourteau/asiair-commander/internal/header"
 	"github.com/macourteau/asiair-commander/internal/model"
+	"github.com/macourteau/asiair-commander/internal/store"
 )
 
 // fileUnclassifiedFrame files one genuinely-unclassified frame through the real
@@ -242,7 +243,7 @@ func TestDismissClearsTransferHistorySurfaces(t *testing.T) {
 	ctx := context.Background()
 	f := fileUnclassifiedFrame(t, h, "Autorun/Bias/Bias_0001.fit")
 
-	if _, total, err := h.store.ListTransferHistory(ctx, "rig-01", 0, 0, 0, 50); err != nil || total != 1 {
+	if _, total, err := h.store.ListTransferHistory(ctx, store.HistoryFilter{RigIDs: []string{"rig-01"}}, 0, 50); err != nil || total != 1 {
 		t.Fatalf("pre-dismiss transfer history total=%d err=%v, want 1", total, err)
 	}
 	if n, err := h.store.CountFramesTonight(ctx, "rig-01", 0); err != nil || n != 1 {
@@ -253,7 +254,7 @@ func TestDismissClearsTransferHistorySurfaces(t *testing.T) {
 		t.Fatalf("discardOne: %v", err)
 	}
 
-	if _, total, err := h.store.ListTransferHistory(ctx, "rig-01", 0, 0, 0, 50); err != nil || total != 0 {
+	if _, total, err := h.store.ListTransferHistory(ctx, store.HistoryFilter{RigIDs: []string{"rig-01"}}, 0, 50); err != nil || total != 0 {
 		t.Fatalf("post-dismiss transfer history total=%d err=%v, want 0", total, err)
 	}
 	if n, err := h.store.CountFramesTonight(ctx, "rig-01", 0); err != nil || n != 0 {

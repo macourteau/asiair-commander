@@ -370,11 +370,46 @@ and any frame whose header the writer refuses (§4.1).
 
 The Retarget card becomes **Edit header**: a field selector (`Target (OBJECT)`, `Filter (FILTER)`)
 above the value input, with the live validation of the selected key. The filter input offers the
-distinct filters in the loaded frame list as suggestions, the same page-bounded list the Find frames
-filters work on (routing-and-filing §9.8). Preview, apply, the
+distinct filters in the whole transfer history as suggestions (§9.4). Preview, apply, the
 confirmation and the progress view are retargeting's, with the confirmation naming the keyword and
 stating that the device original is not modified. The Find frames list is shared and unchanged, and
 a frame without a `FILTER` card shows `—` there.
+
+### 9.4 Find frames filters
+
+The Find frames list is the cross-rig transfer history (`GET /api/frames`, frames with `pulled_at`
+set, newest first), narrowed server-side by a chip filter bar, so a filter searches every
+transferred frame rather than the loaded page. An **Add filter** chip opens a menu of the fields not
+yet in use (each can be used once). A filter's chip opens its editor in a popover, and the × removes
+it. A filter closed while still empty is dropped. An incomplete or invalid one stays as a muted chip
+and is not sent.
+
+| Filter        | Comparisons                          | Parameters                       |
+| ------------- | ------------------------------------ | -------------------------------- |
+| Device        | is / is not one of the rigs          | `rig`…, `rig_not`                |
+| Target        | contains (case-insensitive)          | `target`                         |
+| Filter        | is / is not one of, with `<none>`    | `filter`…, `filter_none`, `filter_not` |
+| Frame type    | is / is not one of                   | `type`…, `type_not`              |
+| Date observed | in / not in `[from, to)`, local days | `obs_from`, `obs_to`, `obs_not`  |
+| Exposure      | `<` `≤` `>` `≥`, in / not in `[a, b]` | `exp_op`, `exp_min`, `exp_max`   |
+| Path          | archive path contains (case-insensitive) | `path`                       |
+
+Every negated filter is the exact complement of its positive form, so a frame missing the field (no
+`FILTER` card, no `DATE-OBS`, no recorded exposure) matches "is not" and "not in", never "is" or
+"in". Exposure compares the value rounded to the millisecond, as displayed, and treats the stored 0
+sentinel as not recorded. Substring matches use `instr`, so `%` and `_` are literal. A malformed
+parameter is a 400. `GET /api/frames/facets` lists the distinct `FILTER` and frame-type values in the
+history for the pickers. Device choices are the configured rigs.
+
+The selection holds the ticked frames themselves, not row ids on the loaded page. It survives a
+filter or page change, so one edit can gather frames no single filter shows together, and the count
+says how many ticked frames the current list hides. **Deselect all** clears the whole selection, and
+a completed edit clears it.
+
+Rejected: filtering the loaded page in the browser, which hid every match beyond the first 200
+transfers; a free-text query language, which an operator would have to learn for a list this small;
+clearing the selection on every reload, which made a selection that spans two targets or two devices
+impossible.
 
 ## 10. Known edges
 
@@ -384,7 +419,6 @@ a frame without a `FILTER` card shows `—` there.
   routing-and-filing §9.8 records for retargeting.
 - **Stray temps and orphans** are not swept, as for retargeting (routing-and-filing §9.8).
 - **Removing a card** is out of scope: no use needs it, and it would need its own layout rule.
-- **The Tools filters still run in the browser** over the loaded page (routing-and-filing §9.8).
 
 ## 11. Invariants HE-1–HE-12
 

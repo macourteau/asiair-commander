@@ -428,6 +428,7 @@ func (s *Server) routes() {
 
 	// Frames + summary.
 	mux.HandleFunc("GET /api/frames", s.guardRead(s.handleTransferHistory))
+	mux.HandleFunc("GET /api/frames/facets", s.guardRead(s.handleTransferHistoryFacets))
 	mux.HandleFunc("GET /api/rigs/{id}/frames", s.guardRead(s.handleFrames))
 	mux.HandleFunc("DELETE /api/rigs/{id}/frames/{frameId}", s.guardWrite(s.handleDiscardFrame))
 
@@ -554,6 +555,7 @@ var registeredRoutes = []string{
 	"POST /api/pause",
 	"POST /api/resume",
 	"GET /api/frames",
+	"GET /api/frames/facets",
 	"GET /api/rigs/{id}/frames",
 	"DELETE /api/rigs/{id}/frames/{frameId}",
 	"POST /api/rigs/{id}/library/link",

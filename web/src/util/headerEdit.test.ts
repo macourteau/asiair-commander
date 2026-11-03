@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EDIT_FIELDS, EDITABLE_KEYS, filterSuggestions, validateEditValue } from "./headerEdit";
+import { EDIT_FIELDS, EDITABLE_KEYS, validateEditValue } from "./headerEdit";
 
 describe("validateEditValue — OBJECT", () => {
   it("accepts a trimmed target and asks for one when blank", () => {
@@ -61,32 +61,5 @@ describe("EDIT_FIELDS", () => {
       expect(EDIT_FIELDS[key].option).toContain(`(${key})`);
       expect(EDIT_FIELDS[key].help).toContain(key);
     }
-  });
-});
-
-describe("filterSuggestions", () => {
-  it("lists the distinct non-empty filters, sorted", () => {
-    expect(
-      filterSuggestions([
-        { filter: "OIII" },
-        { filter: "Ha" },
-        {},
-        { filter: "" },
-        { filter: "  " },
-        { filter: "Ha" },
-        { filter: "L" },
-      ]),
-    ).toEqual(["Ha", "L", "OIII"]);
-  });
-
-  it("keeps spellings that differ only in case as separate suggestions", () => {
-    const got = filterSuggestions([{ filter: "Ha" }, { filter: "HA" }]);
-    expect(got).toHaveLength(2);
-    expect(got).toContain("Ha");
-    expect(got).toContain("HA");
-  });
-
-  it("is empty for an empty list", () => {
-    expect(filterSuggestions([])).toEqual([]);
   });
 });

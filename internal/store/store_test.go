@@ -331,7 +331,7 @@ func TestListTransferHistory(t *testing.T) {
 	}
 
 	// All rigs, no window: 4 pulled frames (never-pulled excluded), newest id first.
-	all, total, err := s.ListTransferHistory(ctx, "", 0, 0, 0, 50)
+	all, total, err := s.ListTransferHistory(ctx, HistoryFilter{}, 0, 50)
 	if err != nil {
 		t.Fatalf("ListTransferHistory: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestListTransferHistory(t *testing.T) {
 	}
 
 	// Rig filter: only rig-01's three pulled frames.
-	r1, r1total, err := s.ListTransferHistory(ctx, "rig-01", 0, 0, 0, 50)
+	r1, r1total, err := s.ListTransferHistory(ctx, HistoryFilter{RigIDs: []string{"rig-01"}}, 0, 50)
 	if err != nil {
 		t.Fatalf("ListTransferHistory rig: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestListTransferHistory(t *testing.T) {
 	}
 
 	// Date window is inclusive on both bounds: [2000, 2500] → b (2000) and z (2500).
-	win, wtotal, err := s.ListTransferHistory(ctx, "", 2000, 2500, 0, 50)
+	win, wtotal, err := s.ListTransferHistory(ctx, HistoryFilter{PulledFrom: 2000, PulledTo: 2500}, 0, 50)
 	if err != nil {
 		t.Fatalf("ListTransferHistory window: %v", err)
 	}
@@ -372,14 +372,14 @@ func TestListTransferHistory(t *testing.T) {
 	}
 
 	// Open-ended lower bound: from=3000 → only c (3000), inclusive.
-	from3, f3total, _ := s.ListTransferHistory(ctx, "", 3000, 0, 0, 50)
+	from3, f3total, _ := s.ListTransferHistory(ctx, HistoryFilter{PulledFrom: 3000}, 0, 50)
 	if f3total != 1 || len(from3) != 1 || from3[0].SourcePath != "c" {
 		t.Errorf("from=3000 history: total=%d rows=%v, want just c", f3total, from3)
 	}
 
 	// Pagination: page size 2 over 4 rows → page 0 has 2, page 1 has 2, total stays 4.
-	p0, ptotal, _ := s.ListTransferHistory(ctx, "", 0, 0, 0, 2)
-	p1, _, _ := s.ListTransferHistory(ctx, "", 0, 0, 1, 2)
+	p0, ptotal, _ := s.ListTransferHistory(ctx, HistoryFilter{}, 0, 2)
+	p1, _, _ := s.ListTransferHistory(ctx, HistoryFilter{}, 1, 2)
 	if ptotal != 4 || len(p0) != 2 || len(p1) != 2 {
 		t.Errorf("pagination: total=%d p0=%d p1=%d, want 4/2/2", ptotal, len(p0), len(p1))
 	}
