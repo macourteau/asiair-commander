@@ -74,7 +74,10 @@ transcript immutability against `CHECK_BASE`, default `origin/main`, build, vet 
 every tag CI uses, `go test -race`, the Windows cross-build); keep it and `ci.yml` in step.
 `build-test` compiles the build-tagged tests but runs none; the `integration` job (real
 Samba/NT1 and a real tunnel) runs only on pushes to `main` and tags. Run `make integration`
-(needs Docker) whenever you change an interface those tests fake, such as `web.Supervisor`. The
+(needs Docker) whenever you change an interface those tests fake, such as `web.Supervisor`. On a
+host where something already holds port 445 (macOS File Sharing, a NAS's Samba) it runs the
+suite isolated inside the compose network (`AC_INTEGRATION_ISOLATED=1` forces it); see
+`test/integration/run.sh`. The
 recorded protocol transcripts (`internal/remote/proto/testdata/transcripts/`) and remote env
 values (`internal/remote/tunnel/testdata/env/`) are immutable: a protocol or env format change
 **adds** a file, and CI rejects any modification or deletion.
