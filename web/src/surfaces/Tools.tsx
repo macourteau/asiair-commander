@@ -56,6 +56,7 @@ import {
   type Column,
 } from "@/design";
 import { basename } from "../util/format";
+import { formatExposure } from "../util/exposure";
 import {
   EDIT_FIELDS,
   EDITABLE_KEYS,
@@ -404,7 +405,7 @@ export function Tools() {
     {
       key: "exptime",
       header: "Exposure",
-      cell: (f) => (f.exptime ? `${f.exptime}s` : "—"),
+      cell: (f) => (f.exptime ? formatExposure(f.exptime) : "—"),
       numeric: true,
     },
     {
