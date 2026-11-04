@@ -1,6 +1,6 @@
 {
   "_comment": "Pinned ASTAP command-line solver (astap_cli), fetched at build time by tools/fetch-astap and bundled into the Docker image and Windows installer. MPL-2.0, redistribution permitted. version is the ASTAP CLI release; sha256 is computed over the per-platform .zip. Bumped by .github/workflows/update-astap-cli.yml, which also mirrors the pinned zips to the astap-cli-VERSION prerelease on mirror_repo. That mirror is what makes a pinned build reproducible: SourceForge overwrites the version-less latest URL in place and keeps only one historical CLI snapshot in its older/ folder, so superseded pins vanish upstream. The mirror releases are public, so the fallback downloads them without credentials; with GH_TOKEN or GITHUB_TOKEN set it also tries the API asset endpoint, which is how a private fork's mirror is read. Deleting a mirror release breaks every Commander release pinned to that version.",
-  "version": "2026.09.01",
+  "version": "2026.10.30",
   "base_url": "https://sourceforge.net/projects/astap-program/files",
   "mirror_repo": "macourteau/asiair-commander",
   "platforms": {
@@ -8,31 +8,25 @@
       "dir": "macOS installer",
       "file": "astap_command-line_version_macOS_M1.zip",
       "bin": "astap_cli",
-      "sha256": "6a59b61c3b9fac987ab5b8241cbd4bffacc05816f58097f52ad1e6bd733cbc45"
+      "sha256": "9c64e6bd5087ce910ff43d56e860a4dcea6abacfd556aca80dcf9eae129096e7"
     },
     "linux/amd64": {
       "dir": "linux_installer",
       "file": "astap_command-line_version_Linux_amd64.zip",
       "bin": "astap_cli",
-      "sha256": "5e7dca28e0e52ad98d4186a01056189e403ba2729bfea9b30f12354436641fe7"
+      "sha256": "5e2229e936fc53587dbacc8b0892822552af275b0c2d6f66b38947e0e41aeb47"
     },
     "linux/arm64": {
       "dir": "linux_installer",
       "file": "astap_command-line_version_Linux_aarch64.zip",
       "bin": "astap_cli",
-      "sha256": "139cebec2abb74f8a3b13f26ac6aec2a1058cab5f83608f2cbaab7eb60bcc622"
+      "sha256": "2e56d79a626c895298d49c9d841d4a449154f5764e2f39eee8bba669fdc6fa35"
     },
     "windows/amd64": {
       "dir": "windows_installer",
       "file": "astap_command-line_version_win64.zip",
       "bin": "astap_cli.exe",
-      "sha256": "e9b94a44bd0f7b60e6e1beeb75951d955815445b965d04c4a61fc6f4c398a3ca"
-    },
-    "windows/arm64": {
-      "dir": "windows_installer",
-      "file": "astap_command-line_version_win11_aarch64.zip",
-      "bin": "astap_cli.exe",
-      "sha256": "c2e1b21b23b85b9a903a930d7273425829f044873eb682aaab4fd5d0bdd3ec59"
+      "sha256": "19918dcc91db608b14153b9233e5776e7ca8d5c839cba52a117d559174c01b0c"
     }
   }
 }
