@@ -27,12 +27,6 @@
       "file": "astap_command-line_version_win64.zip",
       "bin": "astap_cli.exe",
       "sha256": "19918dcc91db608b14153b9233e5776e7ca8d5c839cba52a117d559174c01b0c"
-    },
-    "windows/arm64": {
-      "dir": "windows_installer",
-      "file": "astap_command-line_version_win11_aarch64.zip",
-      "bin": "astap_cli.exe",
-      "sha256": "c2e1b21b23b85b9a903a930d7273425829f044873eb682aaab4fd5d0bdd3ec59"
     }
   }
 }
