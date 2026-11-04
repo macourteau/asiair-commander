@@ -2,10 +2,11 @@ name: CI
 
 on:
   push:
-    # auto/go-toolchain is pushed by update-go-toolchain via a deploy key so this
-    # build-test run (the required check) fires for that PR — a PR opened with the
-    # default GITHUB_TOKEN would not trigger workflows.
-    branches: ["main", "auto/go-toolchain"]
+    # auto/go-toolchain and auto/astap-cli are pushed by update-go-toolchain and
+    # update-astap-cli via a deploy key so this build-test run (the required check)
+    # fires for their PRs — a PR opened with the default GITHUB_TOKEN would not
+    # trigger workflows.
+    branches: ["main", "auto/go-toolchain", "auto/astap-cli"]
     tags: ["v*"]
   pull_request:
 
