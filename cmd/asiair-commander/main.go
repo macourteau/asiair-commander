@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	// The device clock sync resolves the IANA zone a rig reports before writing it
@@ -243,6 +244,15 @@ func runStack(ctx context.Context, dataDir string, logger *slog.Logger, appLog *
 	}
 	defer st.Close()
 
+	// Background work that uses the store is joined before st closes and before runVerb
+	// closes the log, whose rotator would reopen the file and recreate logs/ for a late
+	// line. These defers run after every later one and in reverse: cancel first, because
+	// a listener failure ends serveHTTP without ending the caller's ctx, then the join.
+	var background sync.WaitGroup
+	defer joinBackground(&background, backgroundJoinTimeout, logger)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// The metrics surface is built here (after the store exists so its pool stats can
 	// register) and injected into every subsystem below. The state collector is
 	// registered once, further down, after all its providers are constructed.
@@ -364,21 +374,23 @@ func runStack(ctx context.Context, dataDir string, logger *slog.Logger, appLog *
 				logger.Info("re-queued below-floor frames at startup", "n", n)
 			}
 		}
-		go rig.RunSolver(ctx, st, header.New(), solver, prov, statusHub, nudge, cfgPtr, logger)
+		background.Go(func() {
+			rig.RunSolver(ctx, st, header.New(), solver, prov, statusHub, nudge, cfgPtr, logger)
+		})
 	}
 
 	// Backfill astrometry for already-filed frames once, in the background. It is
 	// display-only and NULL-guarded (idempotent across restarts), so its ordering
 	// relative to the workers does not matter; the app context bounds it. It nudges
 	// the solve worker for each hinted light it marks `none`.
-	go rig.BackfillAstrometry(ctx, st, header.New(), nudge, logger)
+	background.Go(func() { rig.BackfillAstrometry(ctx, st, header.New(), nudge, logger) })
 
 	// Backfill the exposure identity of rows filed before that column existed, so
 	// device-side revision detection covers them too. It is paced by a duty cycle
 	// against the destination volume rather than by a population argument, and
 	// nothing waits on it: any row that needs its value before the cursor arrives
 	// has it computed on demand under the same proof.
-	go rig.BackfillDataDigests(ctx, st, lfs, logger)
+	background.Go(func() { rig.BackfillDataDigests(ctx, st, lfs, logger) })
 
 	// The warm-up round already ran synchronously above, so RunBackground skips its
 	// own eager first scan and just refreshes on the timer (0 → backgroundInterval).
@@ -464,6 +476,27 @@ func runStack(ctx context.Context, dataDir string, logger *slog.Logger, appLog *
 	go updates.Run(ctx)
 
 	return serveHTTP(ctx, dataDir, cfg, srv, logger, ready)
+}
+
+// backgroundJoinTimeout bounds the shutdown wait for background work. The bound is
+// there for file I/O, which no context reaches: a read against a stale network mount
+// can block indefinitely, and a stop must still finish.
+const backgroundJoinTimeout = 10 * time.Second
+
+// joinBackground waits up to timeout for wg. Past that it logs and returns, leaving
+// the stuck work to fail against the closed store rather than hanging the shutdown.
+func joinBackground(wg *sync.WaitGroup, timeout time.Duration, logger *slog.Logger) {
+	joined := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+		logger.Debug("background work joined")
+	case <-time.After(timeout):
+		logger.Warn("background work still running at shutdown; abandoning the wait", "timeout", timeout)
+	}
 }
 
 // serveHTTP binds the web listener with the design architecture §7 port fallback,

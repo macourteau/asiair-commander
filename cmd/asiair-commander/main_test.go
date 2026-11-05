@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -337,4 +339,29 @@ func freePort(t *testing.T) int {
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
 	return port
+}
+
+// TestJoinBackgroundAbandonsStuckWork pins the bound: work no context reaches must
+// cost a stop the timeout and a warning, not the stop itself.
+func TestJoinBackgroundAbandonsStuckWork(t *testing.T) {
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	defer close(release)
+	wg.Go(func() { <-release })
+
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, nil))
+	joined := make(chan struct{})
+	go func() {
+		joinBackground(&wg, 10*time.Millisecond, logger)
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(10 * time.Second):
+		t.Fatal("joinBackground did not return at its timeout")
+	}
+	if !strings.Contains(logged.String(), "abandoning the wait") {
+		t.Errorf("no warning for the abandoned work: %q", logged.String())
+	}
 }
