@@ -47,15 +47,22 @@ jobs:
           COMMIT_COUNT=$(echo "$CODE_COMMITS" | wc -l | tr -d ' ')
           echo "$COMMIT_COUNT code commit(s) since $LATEST_TAG"
 
-          # Derive the bump from Conventional Commit subjects.
+          # Derive the bump from Conventional Commit subjects, plus a BREAKING CHANGE
+          # footer. Dependabot bodies quote upstream changelogs, whose "feat:" and
+          # "BREAKING CHANGE:" lines describe the dependency rather than this project,
+          # so a bot commit's body is never read.
           BUMP="patch"
           while IFS= read -r SHA; do
-            MSG=$(git log -1 --format="%B" "$SHA")
-            if echo "$MSG" | grep -qiE "^[a-z]+(\(.+\))?!:|BREAKING CHANGE:"; then
+            SUBJECT=$(git log -1 --format="%s" "$SHA")
+            BODY=""
+            if [ "$(git log -1 --format="%an" "$SHA")" != "dependabot[bot]" ]; then
+              BODY=$(git log -1 --format="%b" "$SHA")
+            fi
+            if grep -qiE "^[a-z]+(\(.+\))?!:" <<< "$SUBJECT" || grep -qE "^BREAKING CHANGE:" <<< "$BODY"; then
               BUMP="major"
               break
             fi
-            if echo "$MSG" | grep -qiE "^feat(\(.+\))?:"; then
+            if grep -qiE "^feat(\(.+\))?:" <<< "$SUBJECT"; then
               BUMP="minor"
             fi
           done <<< "$CODE_COMMITS"
