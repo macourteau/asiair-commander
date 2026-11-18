@@ -59,9 +59,12 @@ RUN --mount=type=secret,id=github_token \
         go run ./tools/fetch-astap fetch linux/${TARGETARCH} /out/astap; \
     fi
 
-# distroless/static: our binary is CGO_ENABLED=0 and the pinned Linux astap_cli is
-# statically linked (verified: no ld-linux interpreter), so neither needs a libc.
-FROM gcr.io/distroless/static-debian12:nonroot
+# distroless/base (glibc), not distroless/static: our binary is CGO_ENABLED=0, but
+# upstream's Linux astap_cli builds are dynamically linked against glibc (libc,
+# libpthread, libdl). Upstream has shipped both static and dynamic builds, so the
+# runtime provides glibc rather than depending on which one the pin happens to be;
+# ci.yml's docker job executes the bundled solver inside the built image.
+FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=build /out/asiair-commander /asiair-commander
 # Bundle the plate solver beside the binary (the provisioner resolves it there first).
 # /out/astap is empty when built with BUNDLE_ASTAP=0 — the COPY is then a no-op.
