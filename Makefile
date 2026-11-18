@@ -92,7 +92,8 @@ NOTICES_GOARCH ?= $(shell go env GOARCH)
 SPA_NOTICES := internal/web/dist/third-party-notices.txt
 GO_LICENSES := bin/go-licenses
 GO_LICENSES_RUN := CGO_ENABLED=0 GOOS=$(NOTICES_GOOS) GOARCH=$(NOTICES_GOARCH) $(GO_LICENSES)
-ASTAP_VERSION = $(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' deploy/astap/astap-cli.json)
+# The bundled solver's version is per platform: upstream rebuilds one without the others.
+ASTAP_VERSION = $(shell go run ./tools/fetch-astap version $(NOTICES_GOOS)/$(NOTICES_GOARCH))
 
 .PHONY: notices
 notices: ## Generate THIRD_PARTY_NOTICES/ for NOTICES_GOOS/NOTICES_GOARCH (run `make spa` first)

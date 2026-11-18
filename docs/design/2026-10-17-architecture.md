@@ -2146,8 +2146,9 @@ redistribution permitted), which is **bundled at build time and never downloaded
 `deploy/astap/astap-cli.json` pins its version and, per platform, the upstream file and the
 SHA-256 of its zip; `tools/fetch-astap` downloads, verifies and unpacks it. Upstream overwrites its
 version-less file in place and keeps only one historical snapshot, so the pinned zips are also
-mirrored to an `astap-cli-<version>` prerelease of this repository, which is what keeps a build of
-any pinned commit reproducible after upstream moves on. A scheduled workflow re-pins the solver in
+mirrored to a prerelease of this repository whose tag names those exact bytes
+(`astap-cli-<version>-<digest hash>`, since upstream rebuilds a platform without moving a
+version), which is what keeps a build of any pinned commit reproducible after upstream moves on. A scheduled workflow re-pins the solver in
 a pull request held for manual review, since a solver change warrants re-validating a real solve.
 At runtime the provisioner resolves the solver beside the executable, then on `PATH`. The solve
 lifecycle is [features §3](2026-10-17-features.md), and delivery details are

@@ -94,9 +94,9 @@ version; never delete-and-retag or move `:latest` to an older image, because wat
 auto-downgrade installs into a store that refuses to open a schema newer than its binary.
 
 `update-astap-cli.yml` re-pins the ASTAP solver weekly (a PR for manual review) and mirrors the
-pinned zips to an `astap-cli-<version>` prerelease. **Never delete those prereleases**: SourceForge
-overwrites its version-less download in place and keeps one old CLI snapshot, so the mirror is
-the only surviving copy of a superseded pin. `tools/fetch-astap` tries SourceForge, then the
+pinned zips to an `astap-cli-<version>-<digest hash>` prerelease (the manifest's `mirror_tag`).
+**Never delete those prereleases**: SourceForge overwrites its version-less download in place and
+keeps one old CLI snapshot, so the mirror is the only surviving copy of a superseded pin. `tools/fetch-astap` tries SourceForge, then the
 mirror's public URL, then (only with `GH_TOKEN`/`GITHUB_TOKEN` set) the API asset endpoint,
 checking each against the pinned SHA-256; no build needs a token.
 

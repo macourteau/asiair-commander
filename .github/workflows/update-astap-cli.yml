@@ -1,9 +1,13 @@
 name: update-astap-cli
 
 # Keep the pinned ASTAP command-line solver (deploy/astap/astap-cli.json) current.
-# It re-fetches every platform's upstream zip, re-pins the checksums + version when any
-# digest changed and opens a PR, then mirrors whatever version the manifest now pins to
-# an astap-cli-<version> prerelease.
+# It re-fetches every platform's upstream zip, re-pins the checksums, versions and
+# mirror tag when any digest changed and opens a PR, then mirrors whatever the manifest
+# now pins to the prerelease its mirror tag names.
+#
+# A mirror tag names exact bytes, not a version (astap-cli-<version>-<digest hash>;
+# tools/fetch-astap explains why): upstream rebuilds one platform, or re-zips an
+# unchanged binary, without any version moving.
 #
 # The mirror is not a nicety. SourceForge serves the CLI from a version-less URL it
 # overwrites in place and archives only one historical CLI snapshot, so the moment
@@ -120,9 +124,19 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(jq -r .version deploy/astap/astap-cli.json)
-          tag="astap-cli-$VERSION"
+          tag=$(go run ./tools/fetch-astap tag)
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "mirror release $tag already exists"
+            # An existing release is only the mirror of this pin if it holds these exact
+            # bytes. A mismatch means the pin changed without its tag changing, and every
+            # build falling back to the mirror would fail its checksum: fail loudly now.
+            want=$(jq -r '.platforms[] | "\(.file) sha256:\(.sha256)"' deploy/astap/astap-cli.json | sort)
+            have=$(gh release view "$tag" --json assets --jq '.assets[] | "\(.name) \(.digest)"' | sort)
+            if [ "$want" != "$have" ]; then
+              echo "::error::mirror release $tag does not hold the pinned zips"
+              diff <(echo "$want") <(echo "$have") || true
+              exit 1
+            fi
+            echo "mirror release $tag already exists and matches the pin"
             exit 0
           fi
           # Re-downloads each zip and refuses to stage anything that does not match the
