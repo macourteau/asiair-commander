@@ -215,12 +215,14 @@ jobs:
             dist/asiair-commander-setup-*.exe
           if-no-files-found: error
 
-  # Build-only check of the container image (single arch, no push, no secrets)
-  # so Dockerfile rot surfaces here instead of failing release.yml's docker job
-  # at tag time. Gated like installer: packaging, not a per-PR correctness check.
+  # Build check of the container image (single arch, no push, no secrets) so
+  # Dockerfile rot surfaces here instead of failing release.yml's docker job at
+  # tag time. Gated like installer: packaging, not a per-PR correctness check,
+  # except that it also runs for the astap_cli re-pin branch, because a solver
+  # build the runtime image cannot execute is invisible to every other check.
   docker:
     needs: build-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/auto/astap-cli' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -234,5 +236,17 @@ jobs:
           file: deploy/docker/Dockerfile
           platforms: linux/amd64
           push: false
+          load: true
+          tags: asiair-commander:ci
           secrets: |
             github_token=${{ secrets.GITHUB_TOKEN }}
+
+      # The bundled solver must execute in the runtime image: a dynamically linked
+      # build on a base without its libc fails with "exec /astap_cli: no such file
+      # or directory" and plate solving silently never works. Run without arguments
+      # it prints its usage banner, which names its version, and exits non-zero.
+      - name: Bundled astap_cli runs in the image
+        run: |
+          out=$(docker run --rm --entrypoint /astap_cli asiair-commander:ci 2>&1 || true)
+          echo "$out" | head -5
+          echo "$out" | grep -q 'CLI-' || { echo "::error::/astap_cli did not run in the image"; exit 1; }

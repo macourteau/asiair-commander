@@ -2109,7 +2109,8 @@ since a file inside the installer's compressed blob can no longer be signed.
    binary cross-compiled with `CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH` and the version,
    commit and build time in `-ldflags`; the pinned Linux solver fetched and verified for the target
    architecture (`BUNDLE_ASTAP=0` skips it for offline builds);
-3. **Runtime** on `gcr.io/distroless/static-debian12:nonroot`: the binary, the solver beside it,
+3. **Runtime** on `gcr.io/distroless/base-debian12:nonroot` (glibc, because upstream's Linux
+   solver builds are dynamically linked): the binary, the solver beside it,
    and a `/data` directory owned by uid 65532 so an anonymous volume is writable. `EXPOSE 8686
    8687`, `VOLUME /data`, `ENTRYPOINT ["/asiair-commander"]`, `CMD ["run", "-data-dir", "/data"]`,
    `ENV ASIAIR_COMMANDER_CONTAINER=1` (the container marker of §8.2.2), and a `HEALTHCHECK` running
