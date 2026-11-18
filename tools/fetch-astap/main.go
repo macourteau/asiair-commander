@@ -8,8 +8,10 @@
 //
 //	go run ./tools/fetch-astap fetch <goos/goarch> <outdir>
 //	go run ./tools/fetch-astap mirror <outdir>   # stage every platform's pinned zip for the mirror release
-//	go run ./tools/fetch-astap update            # refresh the manifest's checksums + version
+//	go run ./tools/fetch-astap update            # refresh the manifest's checksums, versions + mirror tag
 //	go run ./tools/fetch-astap check             # report pinned-vs-live checksums (non-mutating)
+//	go run ./tools/fetch-astap tag               # print the mirror release tag of the pin
+//	go run ./tools/fetch-astap version <goos/goarch>  # print that platform's pinned ASTAP version
 //
 // The pin is a specific ASTAP release + digest. `fetch` downloads the version-less
 // "latest" URL and, if its bytes no longer match the pinned digest (upstream rolled
@@ -27,6 +29,12 @@
 //
 // `update` (run by the weekly workflow) re-pins to whatever is current, `mirror`
 // stages those bytes for publication, and the workflow opens a PR for manual review.
+//
+// A mirror tag names one exact set of pinned bytes, never just a version: upstream
+// rebuilds a single platform, or re-zips an unchanged binary, without any version
+// moving, and a tag keyed on the version alone would then name a release that holds
+// the previous bytes. `update` therefore writes mirror_tag as the newest platform
+// version plus a short hash over every platform's digest.
 package main
 
 import (
@@ -41,10 +49,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -53,15 +59,19 @@ import (
 const defaultManifest = "deploy/astap/astap-cli.json"
 
 type platform struct {
-	Dir    string `json:"dir"`
-	File   string `json:"file"`
-	Bin    string `json:"bin"`
-	SHA256 string `json:"sha256"`
+	Dir  string `json:"dir"`
+	File string `json:"file"`
+	Bin  string `json:"bin"`
+	// Version is the ASTAP release of this platform's binary. Platforms drift apart:
+	// upstream rebuilds one without the others.
+	Version string `json:"version,omitempty"`
+	SHA256  string `json:"sha256"`
 }
 
 type manifest struct {
 	Comment    string              `json:"_comment,omitempty"`
 	Version    string              `json:"version"`
+	MirrorTag  string              `json:"mirror_tag,omitempty"`
 	BaseURL    string              `json:"base_url"`
 	MirrorRepo string              `json:"mirror_repo"`
 	Platforms  map[string]platform `json:"platforms"`
@@ -69,7 +79,7 @@ type manifest struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fatalf("usage: fetch-astap <fetch|update|check> ...")
+		fatalf("usage: fetch-astap <fetch|mirror|update|check|tag|version> ...")
 	}
 	switch os.Args[1] {
 	case "fetch":
@@ -86,6 +96,13 @@ func main() {
 		runUpdate(false)
 	case "check":
 		runUpdate(true)
+	case "tag":
+		fmt.Println(mirrorTag(load()))
+	case "version":
+		if len(os.Args) != 3 {
+			fatalf("usage: fetch-astap version <goos/goarch>")
+		}
+		fmt.Println(platformVersion(load(), os.Args[2]))
 	default:
 		fatalf("unknown subcommand %q", os.Args[1])
 	}
@@ -110,7 +127,7 @@ func runFetch(key, outdir string) {
 	if err := unzipBin(data, p.Bin, dst); err != nil {
 		fatalf("unzip %s: %v", p.File, err)
 	}
-	fmt.Printf("fetch-astap: bundled %s (astap %s) → %s\n", key, m.Version, dst)
+	fmt.Printf("fetch-astap: bundled %s (astap %s) → %s\n", key, platformVersion(m, key), dst)
 }
 
 // runMirror downloads every platform's zip from upstream, verifies it against the
@@ -139,9 +156,9 @@ func runMirror(outdir string) {
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			fatalf("write %s: %v", dst, err)
 		}
-		fmt.Printf("fetch-astap: staged %-14s (astap %s) → %s\n", key, m.Version, dst)
+		fmt.Printf("fetch-astap: staged %-14s (astap %s) → %s\n", key, platformVersion(m, key), dst)
 	}
-	fmt.Printf("fetch-astap: mirror release tag %s\n", mirrorTag(m.Version))
+	fmt.Printf("fetch-astap: mirror release tag %s\n", mirrorTag(m))
 }
 
 // fetchPinned tries each URL in order and returns the first payload whose SHA-256
@@ -204,39 +221,52 @@ func fetchFailure(key string, mismatched bool, err error) string {
 		"   this is a transport failure, not a stale pin — retry the job)", key, err)
 }
 
-// runUpdate re-fetches every platform's current latest URL, recomputes its SHA-256,
-// and (unless checkOnly) rewrites the manifest in place, refreshing the version from
-// the binary matching this runner's platform. It prints a per-platform report and
-// leaves the exit code 0; the caller inspects the git diff to decide whether to open
-// a PR.
+// runUpdate re-fetches every platform's current latest URL and recomputes its SHA-256.
+// When any digest changed and checkOnly is false, it rewrites the manifest in place:
+// every platform's digest and version, the top-level version (the newest platform's),
+// and a mirror tag naming exactly these bytes. It prints a per-platform report and
+// leaves the exit code 0 when nothing changed; the caller inspects the git diff to
+// decide whether to open a PR.
+//
+// A download or version-read failure is fatal outside checkOnly: re-pinning only the
+// platforms that answered would mint a mirror tag over a mix of old and new digests.
 func runUpdate(checkOnly bool) {
 	m := load()
+	keys := make([]string, 0, len(m.Platforms))
+	for key := range m.Platforms {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	next := make(map[string]platform, len(keys))
 	changed := false
-	for key, p := range m.Platforms {
-		data, err := download(fileURL(m.BaseURL, p.Dir, p.File), nil)
+	for _, key := range keys {
+		p := m.Platforms[key]
+		data, err := downloadRetrying(fileURL(m.BaseURL, p.Dir, p.File), nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %-14s ERROR %v\n", key, err)
-			continue
+			if checkOnly {
+				fmt.Fprintf(os.Stderr, "  %-14s ERROR %v\n", key, err)
+				continue
+			}
+			fatalf("download %s: %v (manifest left unchanged)", key, err)
 		}
 		got := sha256hex(data)
 		state := "unchanged"
 		if !strings.EqualFold(got, p.SHA256) {
 			state = "CHANGED"
 			changed = true
-			if !checkOnly {
-				p.SHA256 = got
-				m.Platforms[key] = p
+		}
+		v, err := versionOf(data, p.Bin)
+		if err != nil {
+			if checkOnly {
+				fmt.Fprintf(os.Stderr, "  %-14s cannot read version: %v\n", key, err)
+			} else {
+				fatalf("%s: %v (manifest left unchanged)", key, err)
 			}
 		}
-		fmt.Printf("  %-14s %s  %s\n", key, state, got)
-
-		// Refresh the version label from the binary matching this runner.
-		if !checkOnly && key == runtime.GOOS+"/"+runtime.GOARCH {
-			if v := versionFrom(data, p.Bin); v != "" && v != m.Version {
-				fmt.Printf("  version: %s → %s\n", m.Version, v)
-				m.Version = v
-			}
-		}
+		fmt.Printf("  %-14s %-9s %s  astap %s\n", key, state, got, v)
+		p.SHA256, p.Version = got, v
+		next[key] = p
 	}
 	if checkOnly {
 		if changed {
@@ -248,28 +278,99 @@ func runUpdate(checkOnly bool) {
 		fmt.Println("astap_cli: already current")
 		return
 	}
+	m.Platforms = next
+	m.Version = newestVersion(m)
+	m.MirrorTag = contentTag(m)
 	save(m)
-	fmt.Println("astap_cli: manifest updated")
+	fmt.Printf("astap_cli: manifest updated to %s, mirror tag %s\n", m.Version, m.MirrorTag)
 }
 
-// versionFrom extracts the ASTAP version from a binary's startup banner
-// ("ASTAP astrometric solver version CLI-2026.07.16"). It runs the binary only when
-// it matches this runner's platform (so the workflow, on linux/amd64, reads it).
-func versionFrom(zipData []byte, bin string) string {
-	tmp, err := os.MkdirTemp("", "astapver-")
+// dottedRE matches each maximal run of digits and dots in a binary; dateRE accepts a
+// run that is exactly an ASTAP release date ("2026.10.30"), so a date is never read
+// out of the middle of a longer dotted number.
+var (
+	dottedRE = regexp.MustCompile(`[0-9.]+`)
+	dateRE   = regexp.MustCompile(`^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}$`)
+)
+
+// versionOf reads the ASTAP version of the binary bin inside zipData without running
+// it, so every platform's binary can be read on any runner and nothing downloaded is
+// ever executed. Every published build carries its release date exactly once; zero or
+// several distinct dates mean the binary's layout changed and is an error, not a guess.
+func versionOf(zipData []byte, bin string) (string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
-		return ""
+		return "", err
 	}
-	defer os.RemoveAll(tmp)
-	exe := filepath.Join(tmp, bin)
-	if err := unzipBin(zipData, bin, exe); err != nil {
-		return ""
+	for _, f := range zr.File {
+		if filepath.Base(f.Name) != bin {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return "", err
+		}
+		found := map[string]bool{}
+		for _, run := range dottedRE.FindAll(b, -1) {
+			if dateRE.Match(run) {
+				found[string(run)] = true
+			}
+		}
+		if len(found) != 1 {
+			dates := make([]string, 0, len(found))
+			for d := range found {
+				dates = append(dates, d)
+			}
+			sort.Strings(dates)
+			return "", fmt.Errorf("%s: want exactly one embedded release date, found %v", bin, dates)
+		}
+		for d := range found {
+			return d, nil
+		}
 	}
-	out, _ := exec.Command(exe).CombinedOutput() // exits non-zero with usage; banner is on stdout/stderr
-	if m := regexp.MustCompile(`CLI-([0-9][0-9.\-]+)`).FindSubmatch(out); m != nil {
-		return string(m[1])
+	return "", fmt.Errorf("%s not found in archive", bin)
+}
+
+// newestVersion is the latest platform version. Release dates are zero-padded, so
+// they order as strings.
+func newestVersion(m manifest) string {
+	newest := m.Version
+	for _, p := range m.Platforms {
+		if p.Version > newest {
+			newest = p.Version
+		}
 	}
-	return ""
+	return newest
+}
+
+// platformVersion is the ASTAP version pinned for key, falling back to the top-level
+// version for a manifest written before platforms carried their own.
+func platformVersion(m manifest, key string) string {
+	if p, ok := m.Platforms[key]; ok && p.Version != "" {
+		return p.Version
+	}
+	return m.Version
+}
+
+// contentTag names the mirror release for exactly the pinned bytes: the version for
+// readability, plus the first 8 hex digits of a SHA-256 over every platform's
+// key and digest, so two pins differing in any byte never share a tag.
+func contentTag(m manifest) string {
+	keys := make([]string, 0, len(m.Platforms))
+	for key := range m.Platforms {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, key := range keys {
+		fmt.Fprintf(h, "%s=%s\n", key, strings.ToLower(m.Platforms[key].SHA256))
+	}
+	return fmt.Sprintf("astap-cli-%s-%s", m.Version, hex.EncodeToString(h.Sum(nil))[:8])
 }
 
 // --- helpers -------------------------------------------------------------------
@@ -309,26 +410,25 @@ func plainSources(urls ...string) []source {
 func fetchSources(m manifest, p platform) []source {
 	srcs := plainSources(
 		fileURL(m.BaseURL, p.Dir, p.File),
-		mirrorDownloadURL(m.MirrorRepo, m.Version, p.File),
+		mirrorDownloadURL(m.MirrorRepo, mirrorTag(m), p.File),
 	)
 	if token := githubToken(); token != "" {
-		srcs = append(srcs, mirrorAPISource(m.MirrorRepo, m.Version, p.File, token))
+		srcs = append(srcs, mirrorAPISource(m.MirrorRepo, mirrorTag(m), p.File, token))
 	}
 	return srcs
 }
 
 // mirrorDownloadURL is a mirror asset's public download URL. It needs no credentials
 // while the mirror repository is public, and answers 404 when it is private.
-func mirrorDownloadURL(repo, version, file string) string {
-	return fmt.Sprintf("%s/%s/releases/download/%s/%s", githubBase, repo, mirrorTag(version), url.PathEscape(file))
+func mirrorDownloadURL(repo, tag, file string) string {
+	return fmt.Sprintf("%s/%s/releases/download/%s/%s", githubBase, repo, tag, url.PathEscape(file))
 }
 
 // mirrorAPISource resolves a platform's zip through the API's asset endpoint, the only
 // way to read a mirror asset on a private repository: its releases/download URL
 // answers 404 even when a token is supplied. That costs a lookup, because the
 // endpoint is addressed by asset id rather than name.
-func mirrorAPISource(repo, version, file, token string) source {
-	tag := mirrorTag(version)
+func mirrorAPISource(repo, tag, file, token string) source {
 	return source{
 		describe: "mirror " + repo + " " + tag + "/" + file + " via the API",
 		resolve: func() (string, http.Header, error) {
@@ -385,9 +485,15 @@ func githubToken() string {
 	return os.Getenv("GITHUB_TOKEN")
 }
 
-// mirrorTag names the release that mirrors one pinned ASTAP version's zips. It is a
-// prerelease so it stays out of the product release stream.
-func mirrorTag(version string) string { return "astap-cli-" + version }
+// mirrorTag names the prerelease that mirrors the pinned zips (a prerelease, so it
+// stays out of the product release stream). A manifest without mirror_tag predates
+// content-named tags and is mirrored under its version alone.
+func mirrorTag(m manifest) string {
+	if m.MirrorTag != "" {
+		return m.MirrorTag
+	}
+	return "astap-cli-" + m.Version
+}
 
 // retryDelays is the backoff schedule for transient download failures: one entry per
 // retry, so a URL is attempted len(retryDelays)+1 times at most.

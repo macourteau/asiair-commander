@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,7 +180,7 @@ func TestFetchSourcesFallBackToTheMirror(t *testing.T) {
 			}
 			for _, s := range srcs[1:] {
 				if !strings.Contains(s.describe, m.MirrorRepo) ||
-					!strings.Contains(s.describe, mirrorTag(m.Version)) ||
+					!strings.Contains(s.describe, mirrorTag(m)) ||
 					!strings.Contains(s.describe, p.File) {
 					t.Errorf("%s: fallback %q does not name the mirror repo, tag and file", key, s.describe)
 				}
@@ -326,7 +328,7 @@ func TestMirrorAPISourceResolvesAssetIDAndAuthenticates(t *testing.T) {
 	apiBase = srv.URL
 	t.Cleanup(func() { apiBase = saved })
 
-	url, header, err := mirrorAPISource("owner/repo", "2026.09.01", "want.zip", "s3cret").resolve()
+	url, header, err := mirrorAPISource("owner/repo", "astap-cli-2026.09.01", "want.zip", "s3cret").resolve()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -402,5 +404,134 @@ func TestTransientClassification(t *testing.T) {
 		if got := transient(tc.err); got != tc.want {
 			t.Errorf("transient(%s) = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// zipWith returns a zip holding one entry, bin, with the given contents.
+func zipWith(t *testing.T, bin string, contents []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write(contents)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestVersionOfReadsTheEmbeddedReleaseDate(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		contents string
+		want     string
+		wantErr  bool
+	}{
+		{"one date", "\x7fELF\x00junk\x002026.11.01\x00more", "2026.11.01", false},
+		{"same date twice", "2026.10.30\x00x\x002026.10.30", "2026.10.30", false},
+		{"no date", "\x7fELF\x00nothing here", "", true},
+		{"two dates", "2026.10.30\x002026.11.01", "", true},
+		{"longer dotted number is not a date", "v1.2026.11.01.7\x00", "", true},
+	} {
+		got, err := versionOf(zipWith(t, "astap_cli", []byte(tc.contents)), "astap_cli")
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("%s: versionOf = %q, %v; want %q, error %v", tc.name, got, err, tc.want, tc.wantErr)
+		}
+	}
+	if _, err := versionOf(zipWith(t, "other", []byte("2026.11.01")), "astap_cli"); err == nil {
+		t.Error("versionOf found a version in an archive without the binary")
+	}
+}
+
+// A mirror tag must name exact bytes: upstream re-zips or rebuilds one platform
+// without moving any version, and such a pin must not reuse the old pin's release.
+func TestContentTagNamesExactBytes(t *testing.T) {
+	m := manifest{Version: "2026.10.30", Platforms: map[string]platform{
+		"linux/amd64":   {SHA256: "aa"},
+		"windows/amd64": {SHA256: "bb"},
+	}}
+	tag := contentTag(m)
+	if !strings.HasPrefix(tag, "astap-cli-2026.10.30-") || len(tag) != len("astap-cli-2026.10.30-")+8 {
+		t.Fatalf("contentTag = %q, want astap-cli-2026.10.30-<8 hex>", tag)
+	}
+	if again := contentTag(m); again != tag {
+		t.Errorf("contentTag is not deterministic: %q then %q", tag, again)
+	}
+	m.Platforms["windows/amd64"] = platform{SHA256: "cc"}
+	if other := contentTag(m); other == tag {
+		t.Errorf("a changed digest kept the tag %q", tag)
+	}
+}
+
+func TestMirrorTagFallsBackToVersionForLegacyManifests(t *testing.T) {
+	if got := mirrorTag(manifest{Version: "2026.10.30"}); got != "astap-cli-2026.10.30" {
+		t.Errorf("legacy mirrorTag = %q", got)
+	}
+	m := manifest{Version: "2026.10.30", MirrorTag: "astap-cli-2026.11.01-0123abcd"}
+	if got := mirrorTag(m); got != m.MirrorTag {
+		t.Errorf("mirrorTag = %q, want the manifest's %q", got, m.MirrorTag)
+	}
+	p := platform{File: "f.zip"}
+	if srcs := fetchSources(m, p); !strings.Contains(srcs[1].describe, "/releases/download/astap-cli-2026.11.01-0123abcd/") {
+		t.Errorf("fallback %q does not use the manifest's mirror tag", srcs[1].describe)
+	}
+}
+
+// TestUpdateRepinsOnlyChangedPlatformAndRetags drives runUpdate against a stub upstream
+// in which one platform was rebuilt under a newer version while the rest kept theirs:
+// the shape that left a pin labelled with the wrong version under a stale mirror tag.
+func TestUpdateRepinsOnlyChangedPlatformAndRetags(t *testing.T) {
+	linux := zipWith(t, "astap_cli", []byte("elf\x002026.10.30\x00"))
+	win := zipWith(t, "astap_cli.exe", []byte("pe\x002026.11.01\x00"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/l/astap_linux.zip/download":
+			w.Write(linux)
+		case "/w/astap_win.zip/download":
+			w.Write(win)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	old := manifest{
+		Version: "2026.10.30", BaseURL: srv.URL, MirrorRepo: "owner/repo",
+		Platforms: map[string]platform{
+			"linux/amd64":   {Dir: "l", File: "astap_linux.zip", Bin: "astap_cli", SHA256: sha256hex(linux)},
+			"windows/amd64": {Dir: "w", File: "astap_win.zip", Bin: "astap_cli.exe", SHA256: "stale"},
+		},
+	}
+	t.Setenv("ASTAP_MANIFEST", filepath.Join(t.TempDir(), "astap-cli.json"))
+	save(old)
+	runUpdate(false)
+	got := load()
+
+	if got.Platforms["windows/amd64"].SHA256 != sha256hex(win) {
+		t.Errorf("windows digest not re-pinned: %q", got.Platforms["windows/amd64"].SHA256)
+	}
+	if v := got.Platforms["windows/amd64"].Version; v != "2026.11.01" {
+		t.Errorf("windows version = %q, want 2026.11.01", v)
+	}
+	if v := got.Platforms["linux/amd64"].Version; v != "2026.10.30" {
+		t.Errorf("linux version = %q, want 2026.10.30", v)
+	}
+	if got.Version != "2026.11.01" {
+		t.Errorf("top-level version = %q, want the newest platform's 2026.11.01", got.Version)
+	}
+	if got.MirrorTag != contentTag(got) || got.MirrorTag == mirrorTag(old) {
+		t.Errorf("mirror tag %q does not name the new bytes (legacy tag %q)", got.MirrorTag, mirrorTag(old))
+	}
+
+	// A second run with nothing changed upstream must leave the manifest byte-identical,
+	// or every weekly run would open an empty PR.
+	before, _ := os.ReadFile(os.Getenv("ASTAP_MANIFEST"))
+	runUpdate(false)
+	after, _ := os.ReadFile(os.Getenv("ASTAP_MANIFEST"))
+	if string(before) != string(after) {
+		t.Errorf("an unchanged upstream rewrote the manifest")
 	}
 }
