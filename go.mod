@@ -7,7 +7,7 @@ toolchain go1.27.4
 require (
 	github.com/astrogo/fitsio v0.3.0
 	github.com/kardianos/service v1.3.0
-	github.com/macourteau/smb1client v1.1.5
+	github.com/macourteau/smb1client v1.1.6
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.73.1
