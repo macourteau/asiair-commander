@@ -10,7 +10,7 @@ require (
 	github.com/macourteau/smb1client v1.1.6
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.73.1
+	github.com/prometheus/common v0.74.0
 	github.com/tailscale/tailcat v0.7.0
 	golang.org/x/crypto v0.59.0
 	golang.org/x/mod v0.43.0
@@ -64,7 +64,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/otiai10/copy v1.10.0 // indirect
-	github.com/pandatix/go-abnf v0.5.3 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/sftp v1.13.11 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
